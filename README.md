@@ -9,8 +9,8 @@
 - Python 包见 `requirements.txt`
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+uv venv --python 3.13
+uv pip install -r requirements.txt
 ```
 
 ## 运行
@@ -20,7 +20,7 @@ python -m venv .venv
 ```
 
 | 参数 | 默认 | 说明 |
-|---|---|---|
+| --- | --- | --- |
 | `--minutes` | 180 | 运行时长（分钟），取自 `config.toml [run].minutes` |
 | `--interval` | 60 | 基础巡检间隔（秒），取自 `[run].interval`；剩余时间久时会自动放慢 |
 | `--room` | 空 | 可选：期望的房间标题关键字；留空则只跟随当前直播间 |
@@ -34,7 +34,7 @@ python -m venv .venv
 检测节奏、开奖观察、采样节流都集中在根目录 `config.toml`，改完直接重启 `main.py` 生效（无需改代码）。时间单位统一为秒。
 
 | 段 | 键 | 默认 | 说明 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `[run]` | `minutes` | 180 | 运行时长（分钟） |
 | | `interval` | 60 | 基础巡检间隔 |
 | `[cold_start]` | `below` | 30 | 样本数低于该值走种子图 bootstrap |
@@ -79,7 +79,7 @@ python -m venv .venv
 冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`bootstrap_fudai_clf.py`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。`main.py` 启动时读 `config.toml [cold_start].below`（默认 30）做同样判断：没有检测模型且样本不足，会先 bootstrap 再热加载。`train.ps1` 的 `-ColdStartBelow` 是独立参数，改阈值时两边保持一致。
 
 | 文件 | 用途 | 训练脚本 |
-|---|---|---|
+| --- | --- | --- |
 | `data\fudai\model\fudai_clf.npz` | 运行时检测福袋位置（`w/thresh/win_w/win_h`） | `train_fudai_clf.py` 或 `bootstrap_fudai_clf.py` |
 | `data\fudai\model\fudai_state.npz` | 3 分类状态（待参与/已参与/倒计时），只做分析 | `train_fudai.py` |
 

@@ -27,10 +27,14 @@ from datetime import datetime
 
 import cv2
 import numpy as np
-import fudai_feat
 from rapidocr_onnxruntime import RapidOCR
 
-SERIAL = os.getenv("FUDAI_SERIAL", "IB8XCEM7IJBAMZY5")
+import adb_conn
+import fudai_feat
+
+ADB_DEVICE_SERIAL = adb_conn.get_adb_device_serial_via_subprocess()
+
+SERIAL = os.getenv("FUDAI_SERIAL", ADB_DEVICE_SERIAL)
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # 检测节奏全部集中在 config.toml；这里只是文件缺失/缺键时的兜底
@@ -284,8 +288,14 @@ def crop(img, roi):
 
 
 BAG_TPL_PATH = next(
-    (p for p in (os.path.join(DATASET_DIR, "bag_template.png"),
-                 os.path.join(ROOT, "bag_template.png")) if os.path.exists(p)),
+    (
+        p
+        for p in (
+            os.path.join(DATASET_DIR, "bag_template.png"),
+            os.path.join(ROOT, "bag_template.png"),
+        )
+        if os.path.exists(p)
+    ),
     os.path.join(ROOT, "bag_template.png"),
 )
 BAG_TPL = cv2.imread(BAG_TPL_PATH) if os.path.exists(BAG_TPL_PATH) else None
@@ -301,9 +311,12 @@ def load_clf():
     try:
         if os.path.exists(CLF_PATH):
             _m = np.load(CLF_PATH)
-            CLF = {"w": _m["w"].astype(np.float32),
-                   "thresh": max(float(_m["thresh"]), 0.12),
-                   "win_w": int(_m["win_w"]), "win_h": int(_m["win_h"])}
+            CLF = {
+                "w": _m["w"].astype(np.float32),
+                "thresh": max(float(_m["thresh"]), 0.12),
+                "win_w": int(_m["win_w"]),
+                "win_h": int(_m["win_h"]),
+            }
     except Exception:
         CLF = None
     return CLF
@@ -523,14 +536,26 @@ def handle_panel(img):
         if ("请勿离开直播间" in t) or ("等待开奖" in t) or ("任务已完成" in t):
             log(f"该福袋已参与，等待开奖（剩余 {rem}s）")
             close_panel()
-            return ("joined_now" if clicked else "already"), rem, ";".join(clicked) or "wait"
+            return (
+                ("joined_now" if clicked else "already"),
+                rem,
+                ";".join(clicked) or "wait",
+            )
 
         # 兜底：确认类弹层（文字按钮不在底部粉色条位置）
         wide_roi = (0, 1300, 1080, 2400)
         wide_items = ocr(crop(img, wide_roi), 0.3)
         hit = None
-        for kw in ("加入购物粉丝团并关注主播", "加入购物粉丝团", "加入粉丝团",
-                   "粉丝团并关注", "立即加入", "确认加入", "确认关注", "立即关注"):
+        for kw in (
+            "加入购物粉丝团并关注主播",
+            "加入购物粉丝团",
+            "加入粉丝团",
+            "粉丝团并关注",
+            "立即加入",
+            "确认加入",
+            "确认关注",
+            "立即关注",
+        ):
             hit = next((i for i in wide_items if kw in i["text"]), None)
             if hit:
                 break
@@ -551,7 +576,11 @@ def handle_panel(img):
             continue
 
         log(f"面板已关闭，任务处理结束: {t[:40]}")
-        return ("joined_now" if clicked else "unknown"), rem, ";".join(clicked) or t[:40]
+        return (
+            ("joined_now" if clicked else "unknown"),
+            rem,
+            ";".join(clicked) or t[:40],
+        )
 
     log("面板任务步骤已达上限，停止继续点击")
     close_panel()
@@ -562,7 +591,9 @@ def save_dataset(img, cx, cy, label, src):
     """把成功识别到的福袋图标裁成样本，作为训练数据（节流 + 去重）"""
     now = time.time()
     st = _dataset_state
-    if st["label"] == label and now - st["ts"] < float(cfg("sample", "throttle_seconds")):
+    if st["label"] == label and now - st["ts"] < float(
+        cfg("sample", "throttle_seconds")
+    ):
         return None
     x0 = max(0, int(cx) - 60)
     y0 = max(0, int(cy) - 45)
@@ -585,8 +616,16 @@ def save_dataset(img, cx, cy, label, src):
         w = csv.writer(f)
         if new:
             w.writerow(["time", "room", "label", "source", "bbox", "file"])
-        w.writerow([f"{datetime.now():%Y-%m-%d %H:%M:%S}", ROOM_NAME or "", label, src,
-                    f"{x0},{y0},{x1},{y1}", os.path.relpath(p, ROOT)])
+        w.writerow(
+            [
+                f"{datetime.now():%Y-%m-%d %H:%M:%S}",
+                ROOM_NAME or "",
+                label,
+                src,
+                f"{x0},{y0},{x1},{y1}",
+                os.path.relpath(p, ROOT),
+            ]
+        )
     st.update(ts=now, label=label, crop=crop_img)
     return p
 
@@ -669,6 +708,7 @@ def watch_result(seconds=None):
             last = time.time()
             log(f"等待开奖中… {t[:40]}")
         time.sleep(poll)
+
 
 if __name__ == "__main__":
     # 兼容旧入口：实际主循环已迁移到 main.py
