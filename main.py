@@ -227,9 +227,17 @@ def main():
                     cur_room = max((cur_room, name), key=len)
                     fa.ROOM_NAME = cur_room
                 else:
-                    fa.log(f"直播间标题变化: {cur_room} -> {name}（仅记录，暂不自动切换）")
+                    fa.log(f"直播间标题变化: {cur_room} -> {name}，重置状态并重新开始检测福袋")
                     fa.log_csv("room_title_change", f"{cur_room} -> {name}")
                     cur_room = name
+                    next_draw_ts = 0.0
+                    next_bag_ts = 0.0
+                    draw_watched = True
+                    last_rem = None
+                    last_rem_ts = 0.0
+                    cycle_count = 1
+                    fa.save(img, "room_title_change")
+                    continue
             if args.room and args.room not in name and not room_warned:
                 fa.log(
                     f"提示: 当前直播间为「{name}」，与 --room「{args.room}」不一致；已按当前直播间继续"
