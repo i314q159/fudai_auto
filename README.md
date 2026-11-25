@@ -4,7 +4,7 @@
 
 ## 依赖
 
-- Python 3.10+（已在 3.13 验证）
+- Python 3.11+（已在 3.13 验证；`config.toml` 用标准库 `tomllib`）
 - adb 已连接手机，`adb devices` 能看到设备
 - Python 包见 `requirements.txt`
 
@@ -21,11 +21,41 @@ python -m venv .venv
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--minutes` | 180 | 运行时长（分钟） |
-| `--interval` | 30 | 基础巡检间隔（秒）；剩余时间久时会自动放慢 |
+| `--minutes` | 180 | 运行时长（分钟），取自 `config.toml [run].minutes` |
+| `--interval` | 60 | 基础巡检间隔（秒），取自 `[run].interval`；剩余时间久时会自动放慢 |
 | `--room` | 空 | 可选：期望的房间标题关键字；留空则只跟随当前直播间 |
 | `--serial` | IB8XCEM7IJBAMZY5 | adb 设备序列号（也可用环境变量 `FUDAI_SERIAL`） |
-| `--cold-start-below` | 30 | 样本数低于该值且没有检测模型时，自动用种子图冷启动 |
+| `--cold-start-below` | 30 | 样本数低于该值时冷启动，取自 `[cold_start].below` |
+
+命令行显式传参时覆盖 `config.toml`，`config.toml` 覆盖代码内置默认值。
+
+## 配置 config.toml
+
+检测节奏、开奖观察、采样节流都集中在根目录 `config.toml`，改完直接重启 `main.py` 生效（无需改代码）。时间单位统一为秒。
+
+| 段 | 键 | 默认 | 说明 |
+|---|---|---|---|
+| `[run]` | `minutes` | 180 | 运行时长（分钟） |
+| | `interval` | 60 | 基础巡检间隔 |
+| `[cold_start]` | `below` | 30 | 样本数低于该值走种子图 bootstrap |
+| `[detect]` | `shot_retry_seconds` | 10 | 截图异常后的重试等待 |
+| | `shot_error_log_every_seconds` | 30 | 连续截图异常的日志节流 |
+| | `room_switch_settle_seconds` | 2 | 切房后等待再截图/关注 |
+| | `room_missing_warn_seconds` | 180 | 连续多久没标题就警告 |
+| | `default_draw_seconds` | 750 | 读不到倒计时的默认排期 |
+| | `new_cycle_jump_seconds` | 90 | 倒计时回跳多少秒算新一轮 |
+| | `watch_seconds` | 90 | 开奖观察窗口时长 |
+| | `draw_margin_seconds` | 3 | 提前多少秒进观察窗口 |
+| | `panel_settle_seconds` | 1 | 面板处理后的隔拍 |
+| `[pacing]` | `slow_remaining_seconds` / `slow_interval` | 600 / 180 | 剩余 >10 分钟时的巡检间隔 |
+| | `mid_remaining_seconds` / `mid_interval` | 240 / 90 | 剩余 >4 分钟时的巡检间隔 |
+| | `near_min_seconds` | 20 | 临近开奖的下限间隔 |
+| | `min_sleep_seconds` | 1.5 | 每轮最短休眠 |
+| `[sample]` | `throttle_seconds` | 60 | 同状态样本采集节流 |
+| `[watch]` | `poll_seconds` | 3 | 开奖窗口内截图/识别间隔 |
+| | `log_every_seconds` | 20 | “等待开奖中”日志节流 |
+
+配置写错或未知键会在启动时打印 `[config]` 提示，并回落到内置默认值。
 
 ## 训练
 
@@ -43,7 +73,7 @@ python -m venv .venv
 .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动全量重训（常驻）
 ```
 
-冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`bootstrap_fudai_clf.py`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。`main.py` 启动时也会做同样判断：没有检测模型且样本不足，会先 bootstrap 再热加载。
+冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`bootstrap_fudai_clf.py`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。`main.py` 启动时读 `config.toml [cold_start].below`（默认 30）做同样判断：没有检测模型且样本不足，会先 bootstrap 再热加载。`train.ps1` 的 `-ColdStartBelow` 是独立参数，改阈值时两边保持一致。
 
 | 文件 | 用途 | 训练脚本 |
 |---|---|---|
@@ -106,6 +136,7 @@ train_fudai.py       状态模型训练（3 分类 + LOO 评估）-> fudai_state
 train.ps1            一键训练/预测/常驻重训（含冷启动阈值）
 data/fudai/bag_template.png  福袋图标模板（模型缺失时兜底，已入库）
 requirements.txt     依赖
+config.toml          检测节奏/开奖观察/采样节流配置（CLI 可覆盖）
 log/                 运行日志与截图
 log/run_*.log        每次运行的文本日志
 log/fudai_log.csv    参与/切房/开奖结果记录

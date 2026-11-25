@@ -41,13 +41,22 @@ def ensure_model(cold_start_below):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", type=float, default=180, help="运行时长（分钟）")
-    ap.add_argument("--interval", type=float, default=60, help="检查福袋的基础间隔（秒）")
+    ap.add_argument("--minutes", type=float, default=None,
+                    help="运行时长（分钟），默认取 config.toml [run].minutes")
+    ap.add_argument("--interval", type=float, default=None,
+                    help="检查福袋的基础间隔（秒），默认取 config.toml [run].interval")
     ap.add_argument("--room", default="", help="可选：期望的直播间标题关键字，留空跟随当前直播间")
     ap.add_argument("--serial", default=None, help="adb 设备序列号（默认取 FUDAI_SERIAL 或内置值）")
-    ap.add_argument("--cold-start-below", type=int, default=30,
-                    help="样本数低于该值时走冷启动（默认 30）")
+    ap.add_argument("--cold-start-below", type=int, default=None,
+                    help="样本数低于该值时走冷启动，默认取 config.toml [cold_start].below")
     args = ap.parse_args()
+
+    if args.minutes is None:
+        args.minutes = float(fa.cfg("run", "minutes"))
+    if args.interval is None:
+        args.interval = float(fa.cfg("run", "interval"))
+    if args.cold_start_below is None:
+        args.cold_start_below = int(fa.cfg("cold_start", "below"))
 
     if args.serial:
         fa.SERIAL = args.serial
@@ -87,7 +96,7 @@ def main():
         now = time.time()
         if last_rem is not None and last_rem_ts:
             expect = max(0, last_rem - (now - last_rem_ts))
-            if rem > expect + 90:
+            if rem > expect + float(fa.cfg("detect", "new_cycle_jump_seconds")):
                 cycle_count += 1
                 fa.log(f"检测到新一轮福袋（第 {cycle_count} 轮），剩余 {rem}s 开奖")
                 fa.log_csv("new_cycle", f"#{cycle_count} rem={rem}")
@@ -100,11 +109,11 @@ def main():
         try:
             img = fa.shot()
         except Exception as e:
-            if time.time() - last_err_log > 30:
+            if time.time() - last_err_log > float(fa.cfg("detect", "shot_error_log_every_seconds")):
                 last_err_log = time.time()
                 fa.log(f"截图异常(自动重试): {e}")
                 fa.log_csv("shot_error", str(e)[:80])
-            time.sleep(10)
+            time.sleep(float(fa.cfg("detect", "shot_retry_seconds")))
             continue
 
         cycle_no += 1
@@ -133,7 +142,7 @@ def main():
                 last_rem_ts = 0.0
                 cycle_count = 1
                 fa.save(img, "room_switch")
-                time.sleep(2)
+                time.sleep(float(fa.cfg("detect", "room_switch_settle_seconds")))
                 r = fa.follow_anchor(img)
                 if r:
                     fa.log_csv("follow", f"{name} {r}")
@@ -143,8 +152,9 @@ def main():
                     f"提示: 当前直播间为「{name}」，与 --room「{args.room}」不一致；已按当前直播间继续"
                 )
                 room_warned = True
-        elif time.time() - last_room_seen > 180:
-            fa.log("警告: 连续 3 分钟未识别到直播间标题，可能已离开直播间")
+        elif time.time() - last_room_seen > float(fa.cfg("detect", "room_missing_warn_seconds")):
+            mins = float(fa.cfg("detect", "room_missing_warn_seconds")) / 60
+            fa.log(f"警告: 连续 {mins:g} 分钟未识别到直播间标题，可能已离开直播间")
             fa.log_csv("warn_room", "no-title")
             last_room_seen = time.time()
             fa.save(img, "no_room_title")
@@ -171,13 +181,13 @@ def main():
                 next_draw_ts = time.time() + rem
                 draw_watched = False
             else:
-                next_draw_ts = time.time() + 750
+                next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
                 draw_watched = False
             if status == "need_payment":
                 fa.log("该福袋需要付费（抖币），本房间不再自动点击，请手动处理")
                 fa.log_csv("need_payment", f"{cur_room} {detail}")
             track_cycle(rem)
-            time.sleep(1.0)
+            time.sleep(float(fa.cfg("detect", "panel_settle_seconds")))
         else:
             # 打开福袋检查（未识别到直播间标题时跳过，避免在搜索页/桌面误点）
             if not fa.ROOM_NAME:
@@ -206,32 +216,38 @@ def main():
                         draw_watched = False
                         fa.log(f"当前福袋已参与，剩余 {rem}s 开奖")
                     else:
-                        next_draw_ts = time.time() + 750
+                        next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
                         draw_watched = False
-                        fa.log("未读到倒计时，按默认 12.5 分钟排开奖")
+                        mins = float(fa.cfg("detect", "default_draw_seconds")) / 60
+                    fa.log(f"未读到倒计时，按默认 {mins:g} 分钟排开奖")
                     if status == "need_payment":
                         fa.log("该福袋需要付费（抖币），已暂停自动点击，请手动处理")
                         fa.log_csv("need_payment", f"{cur_room} {detail}")
                     track_cycle(rem)
 
         # 开奖窗口
-        if (not draw_watched) and next_draw_ts and time.time() >= next_draw_ts - 3:
+        if (not draw_watched) and next_draw_ts and time.time() >= next_draw_ts - float(
+            fa.cfg("detect", "draw_margin_seconds")
+        ):
             fa.log(f"进入开奖观察窗口（第 {cycle_count} 轮）")
-            fa.watch_result(90)
+            fa.watch_result(float(fa.cfg("detect", "watch_seconds")))
             draw_watched = True
 
         # 睡眠：按剩余时间自适应，临近开奖打短，避免错过开奖瞬间
         gap = args.interval
         if (not draw_watched) and last_rem is not None:
-            if last_rem > 600:
-                gap = 180
-            elif last_rem > 240:
-                gap = 90
+            if last_rem > float(fa.cfg("pacing", "slow_remaining_seconds")):
+                gap = float(fa.cfg("pacing", "slow_interval"))
+            elif last_rem > float(fa.cfg("pacing", "mid_remaining_seconds")):
+                gap = float(fa.cfg("pacing", "mid_interval"))
             else:
-                gap = max(20, args.interval)
+                gap = max(float(fa.cfg("pacing", "near_min_seconds")), args.interval)
         sleep_s = gap
         if (not draw_watched) and next_draw_ts:
-            sleep_s = max(1.5, min(sleep_s, next_draw_ts - time.time() - 2))
+            sleep_s = max(
+                float(fa.cfg("pacing", "min_sleep_seconds")),
+                min(sleep_s, next_draw_ts - time.time() - float(fa.cfg("detect", "draw_margin_seconds"))),
+            )
         time.sleep(sleep_s)
 
     fa.log(f"结束，共参与 {bag_count} 次福袋")

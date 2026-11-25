@@ -197,7 +197,7 @@ def runtime_loop():
 
     # 入口
     box(d, (900, 160, 1700, 320), "main.py 启动",
-        "venv 启动 · 单实例锁 127.0.0.1:59999\n--minutes / --interval / --cold-start-below · FUDAI_SERIAL 覆盖串口",
+        "venv 启动 · 单实例锁 127.0.0.1:59999\n--minutes / --interval / --cold-start-below 默认读 config.toml",
         BLUE, BLUE_BG, fb, fbd)
     box(d, (900, 400, 1700, 610), "加载检测模型（ensure_model）",
         "load_clf() 加载 fudai_clf.npz\n无模型且样本 < 阈值（默认 30）→ bootstrap + reload_clf()\n日志标明当前模型来源，失败回退模板匹配",
@@ -206,12 +206,12 @@ def runtime_loop():
 
     # 每轮
     box(d, (900, 690, 1700, 860), "每轮：截图",
-        "adb exec-out screencap；异常 → 重连 adb / shell+pull 兜底\n连续异常只记一条日志，10s 后重试", BLUE, BLUE_BG, fb, fbd)
+        "adb exec-out screencap；异常 → 重连 adb / shell+pull 兜底\n连续异常按 [detect] 节流日志并延时重试", BLUE, BLUE_BG, fb, fbd)
     arrow(d, (1300, 610), (1300, 690))
     label(d, (1324, 650), "开始巡检", fs, MUTED, "lm")
 
     box(d, (900, 930, 1700, 1150), "1. OCR 直播间标题并跟随",
-        "首见 → 点一次主播「关注」；名称变化 → 重置轮次 / 开奖时间 / 关注\n连续 3 分钟无标题 → 警告并跳过福袋检查（防在搜索页误点）",
+        "首见 → 点一次主播「关注」；名称变化 → 重置轮次 / 开奖时间 / 关注\n超过阈值无标题 → 警告并跳过福袋检查（防在搜索页误点）",
         ORANGE, ORANGE_BG, fb, fbd)
     arrow(d, (1300, 860), (1300, 930))
 
@@ -239,7 +239,7 @@ def runtime_loop():
 
     # 收尾
     box(d, (500, 1860, 1900, 2050), "汇总：读倒计时 → 排开奖 → 自适应休眠",
-        "rem → next_draw_ts；倒计时「回跳」识别新一轮福袋\n>600s 睡 180s · >240s 睡 90s · 临近开奖 ≤30s · 到点 watch_result(90)\n结果与参与记录写 log/fudai_log.csv",
+        "rem → next_draw_ts；倒计时「回跳」识别新一轮福袋\n巡检节奏 / 开奖窗口 / 截图重试等待全部读 config.toml\n结果与参与记录写 log/fudai_log.csv",
         ORANGE, ORANGE_BG, fb, fbd)
     arrow(d, (725, 1770), (725, 1860))
     arrow(d, (1875, 1790), (1875, 1860))

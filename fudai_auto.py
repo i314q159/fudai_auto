@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import time
+import tomllib
 from datetime import datetime
 
 import cv2
@@ -31,6 +32,66 @@ from rapidocr_onnxruntime import RapidOCR
 
 SERIAL = os.getenv("FUDAI_SERIAL", "IB8XCEM7IJBAMZY5")
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# 检测节奏全部集中在 config.toml；这里只是文件缺失/缺键时的兜底
+DEFAULT_CONFIG = {
+    "run": {"minutes": 180.0, "interval": 60.0},
+    "cold_start": {"below": 30},
+    "detect": {
+        "shot_retry_seconds": 10.0,
+        "shot_error_log_every_seconds": 30.0,
+        "room_switch_settle_seconds": 2.0,
+        "room_missing_warn_seconds": 180.0,
+        "default_draw_seconds": 750.0,
+        "new_cycle_jump_seconds": 90.0,
+        "watch_seconds": 90.0,
+        "draw_margin_seconds": 3.0,
+        "panel_settle_seconds": 1.0,
+    },
+    "pacing": {
+        "slow_remaining_seconds": 600.0,
+        "slow_interval": 180.0,
+        "mid_remaining_seconds": 240.0,
+        "mid_interval": 90.0,
+        "near_min_seconds": 20.0,
+        "min_sleep_seconds": 1.5,
+    },
+    "sample": {"throttle_seconds": 60.0},
+    "watch": {"poll_seconds": 3.0, "log_every_seconds": 20.0},
+}
+CONFIG_PATH = os.path.join(ROOT, "config.toml")
+
+
+def _load_config():
+    cfg = {sec: dict(vals) for sec, vals in DEFAULT_CONFIG.items()}
+    if not os.path.exists(CONFIG_PATH):
+        return cfg
+    try:
+        with open(CONFIG_PATH, "rb") as f:
+            raw = tomllib.load(f)
+    except Exception as e:
+        print(f"[config] 读取 {CONFIG_PATH} 失败，使用内置默认值: {e}")
+        return cfg
+    for sec, vals in raw.items():
+        if sec not in cfg or not isinstance(vals, dict):
+            print(f"[config] 忽略未知段 [{sec}]")
+            continue
+        for key, val in vals.items():
+            if key in cfg[sec]:
+                cfg[sec][key] = val
+            else:
+                print(f"[config] 忽略未知键 [{sec}].{key}")
+    return cfg
+
+
+CONFIG = _load_config()
+
+
+def cfg(section, key):
+    """读取配置；缺段/缺键时回落到内置默认值"""
+    return CONFIG.get(section, {}).get(key, DEFAULT_CONFIG[section][key])
+
+
 LOG_DIR = os.path.join(ROOT, "log")
 SHOT_DIR = os.path.join(LOG_DIR, "shots")
 LOG_CSV = os.path.join(LOG_DIR, "fudai_log.csv")
@@ -495,7 +556,7 @@ def save_dataset(img, cx, cy, label, src):
     """把成功识别到的福袋图标裁成样本，作为训练数据（节流 + 去重）"""
     now = time.time()
     st = _dataset_state
-    if st["label"] == label and now - st["ts"] < 60:
+    if st["label"] == label and now - st["ts"] < float(cfg("sample", "throttle_seconds")):
         return None
     x0 = max(0, int(cx) - 60)
     y0 = max(0, int(cy) - 45)
@@ -569,9 +630,13 @@ def open_bag_panel(img):
     return img2, f"tap({int(cx)},{int(cy)}) {src}"
 
 
-def watch_result(seconds=80):
+def watch_result(seconds=None):
+    if seconds is None:
+        seconds = float(cfg("detect", "watch_seconds"))
     t_end = time.time() + seconds
     last = 0
+    poll = float(cfg("watch", "poll_seconds"))
+    log_every = float(cfg("watch", "log_every_seconds"))
     while time.time() < t_end:
         img = shot()
         t = texts_of(ocr(crop(img, RESULT_ROI), 0.45))
@@ -594,10 +659,10 @@ def watch_result(seconds=80):
                     time.sleep(0.8)
                     break
             return
-        if time.time() - last > 20:
+        if time.time() - last > log_every:
             last = time.time()
             log(f"等待开奖中… {t[:40]}")
-        time.sleep(3)
+        time.sleep(poll)
 
 if __name__ == "__main__":
     # 兼容旧入口：实际主循环已迁移到 main.py
