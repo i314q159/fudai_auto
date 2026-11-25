@@ -8,6 +8,7 @@
 import argparse
 import glob
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -16,6 +17,84 @@ from datetime import datetime
 from difflib import SequenceMatcher
 
 import fudai_auto as fa
+
+LOCK_PORT = 59999
+
+
+def _port_listener_pid(port):
+    """返回监听该端口的 PID；找不到返回 None"""
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["netstat", "-ano"], capture_output=True, text=True, timeout=10
+            ).stdout
+            for line in out.splitlines():
+                if f":{port}" in line and "LISTENING" in line.upper():
+                    return int(line.split()[-1])
+        else:
+            out = subprocess.run(
+                ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                capture_output=True, text=True, timeout=10
+            ).stdout.strip()
+            if out:
+                return int(out.splitlines()[0])
+            out = subprocess.run(
+                ["ss", "-ltnp"], capture_output=True, text=True, timeout=10
+            ).stdout
+            for line in out.splitlines():
+                if f":{port}" in line and "pid=" in line:
+                    return int(line.split("pid=")[1].split(",")[0])
+    except Exception:
+        pass
+    return None
+
+
+def _pid_cmdline(pid):
+    try:
+        if os.name == "nt":
+            cmd = f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"
+            return subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                capture_output=True, text=True, timeout=10
+            ).stdout.strip()
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return f.read().replace(b"\x00", b" ").decode("utf-8", "ignore")
+    except Exception:
+        return ""
+
+
+def _kill_pid(pid):
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                       capture_output=True, timeout=10)
+    else:
+        os.kill(pid, signal.SIGKILL)
+
+
+def acquire_instance_lock(port=LOCK_PORT, attempts=4):
+    """端口被旧实例占用时自动结束旧实例并接管；其它程序占用则放弃"""
+    for _ in range(attempts):
+        lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            lock.bind(("127.0.0.1", port))
+            lock.listen(1)
+            return lock
+        except OSError:
+            lock.close()
+            pid = _port_listener_pid(port)
+            if pid and pid != os.getpid():
+                cmd = _pid_cmdline(pid)
+                if (not cmd) or ("main.py" in cmd) or ("fudai_auto.py" in cmd):
+                    fa.log(f"端口 {port} 被旧实例 PID {pid} 占用，自动结束并接管")
+                    _kill_pid(pid)
+                    time.sleep(2.0)
+                    continue
+                fa.log(f"端口 {port} 被 PID {pid} 占用且不是本程序，放弃启动")
+                return None
+            fa.log(f"端口 {port} 占用进程未知，1 秒后重试")
+            time.sleep(1.0)
+    fa.log(f"多次尝试仍未取得端口 {port}，放弃启动")
+    return None
 
 
 def same_room(a, b, threshold=0.86):
@@ -75,13 +154,10 @@ def main():
         fa.LOG_DIR, f"run_{datetime.now():%Y%m%d_%H%M%S}.log"
     )
 
-    # 单实例锁，防止多个进程抢点击
-    lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        lock.bind(("127.0.0.1", 59999))
-        lock.listen(1)
-    except OSError:
-        fa.log("已有实例在运行，本进程退出")
+    # 单实例锁：旧实例还在时自动结束它并接管
+    lock = acquire_instance_lock()
+    if lock is None:
+        fa.log("无法取得单实例锁，本进程退出")
         return
 
     ensure_model(args.cold_start_below)
