@@ -1,0 +1,16 @@
+# 运行依赖（Python 3.10+，已在 3.13 验证）
+# 安装：.venv\Scripts\python.exe -m pip install -r requirements.txt
+opencv-python==5.1.0.95
+numpy==2.5.5
+rapidocr-onnxruntime==1.2.3
+
+# 以下由 rapidocr-onnxruntime 自动带入，一般无需手动安装
+# onnxruntime==1.32.0
+# pyclipper==1.4.0
+# PyYAML==6.0.4
+# shapely==2.2.0
+# pillow==13.0.0
+# protobuf==7.36.2
+# flatbuffers==25.12.19
+# six==1.17.0
+# packaging==26.4
