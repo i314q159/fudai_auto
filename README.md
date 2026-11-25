@@ -16,7 +16,7 @@ python -m venv .venv
 ## 运行
 
 ```powershell
-.venv\Scripts\python.exe fudai_auto.py --minutes 180 --interval 30
+.venv\Scripts\python.exe main.py --minutes 180 --interval 30
 ```
 
 | 参数 | 默认 | 说明 |
@@ -24,14 +24,17 @@ python -m venv .venv
 | `--minutes` | 180 | 运行时长（分钟） |
 | `--interval` | 30 | 基础巡检间隔（秒）；剩余时间久时会自动放慢 |
 | `--room` | 空 | 可选：期望的房间标题关键字；留空则只跟随当前直播间 |
-| `--serial` | IB8XCEM7IJBAMZY5 | adb 设备序列号 |
+| `--serial` | IB8XCEM7IJBAMZY5 | adb 设备序列号（也可用环境变量 `FUDAI_SERIAL`） |
+| `--cold-start-below` | 30 | 样本数低于该值且没有检测模型时，自动用种子图冷启动 |
 
 ## 训练
 
 除采集外的全部训练都走 `train.ps1`，一条命令跑完两个模型并打印产物：
 
 ```powershell
-.\train.ps1                          # 检测模型 + 状态模型（约 7~10 秒）
+.\train.ps1                          # 样本 ≥30 全量训练；<30 自动冷启动（种子图 bootstrap）
+.\train.ps1 -ColdStartBelow 20       # 自定义冷启动阈值
+.\train.ps1 -Seed data\fudai\seed\seed_vgn.png  # 指定种子图
 .\train.ps1 -DryRun                  # 两个都只评估，不写任何文件
 .\train.ps1 -SkipState               # 只训检测模型
 .\train.ps1 -SkipDetector            # 只训状态模型
@@ -39,6 +42,8 @@ python -m venv .venv
 .\train.ps1 -Predict data\fudai\icons # 用状态模型预测图片/目录
 .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动全量重训（常驻）
 ```
+
+冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`bootstrap_fudai_clf.py`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。
 
 | 文件 | 用途 | 训练脚本 |
 |---|---|---|

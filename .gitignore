@@ -4,7 +4,7 @@ __pycache__/
 *.pyc
 _auto_shot.png
 
-# 训练数据整体不入库，但保留福袋模板图
+# 这些是本机训练产物，不入库；只保留福袋模板图
 data/*
 !data/fudai/
 data/fudai/*

@@ -44,6 +44,7 @@ import glob
 import os
 import re
 import sys
+import zlib
 
 import cv2
 import numpy as np
@@ -130,8 +131,10 @@ def load_samples(labels_csv=LABELS_CSV, extra=(), extra_label=None):
                 }
             )
             seen.add(os.path.normcase(os.path.abspath(p)))
-    for m in missing:
-        print(f"[warn] 标注里记录的文件不存在，已跳过: {m}")
+    if missing:
+        print(f"[warn] 标注里有 {len(missing)} 个文件不存在（多半是数据集被清理过），已跳过")
+        for m in missing[:3]:
+            print(f"        {m}")
 
     for p in _expand(extra):
         key = os.path.normcase(os.path.abspath(p))
@@ -321,6 +324,11 @@ def load_model(path=MODEL_PATH):
 # --------------------------------------------------------------------------
 # 评估
 # --------------------------------------------------------------------------
+def stable_seed(path):
+    """跨进程/跨机器稳定的随机种子（不能用内置 hash，Python 每个进程都不同）"""
+    return zlib.crc32(os.path.basename(path).encode("utf-8")) % (2 ** 32)
+
+
 def leave_one_out(samples, aug_n, epochs):
     """留一交叉验证；返回 (准确率, 混淆矩阵 dict, 错误明细)"""
     n = len(samples)
@@ -331,7 +339,7 @@ def leave_one_out(samples, aug_n, epochs):
         train = [s for j, s in enumerate(samples) if j != i]
         X, y = [], []
         for s in train:
-            for v in augment(s["img"], np.random.default_rng(hash(s["path"]) % 2**32), n=aug_n):
+            for v in augment(s["img"], np.random.default_rng(stable_seed(s["path"])), n=aug_n):
                 X.append(extract_features(v))
                 y.append(s["label"])
         clf = SoftmaxClassifier().fit(X, y, epochs=epochs)
@@ -371,8 +379,16 @@ def train(args):
         print("[error] 可用于训练的样本不足 3 张，先让 fudai_auto.py 多跑一会儿采集样本")
         return 1
     per_class = {c: sum(1 for s in trainable if s["label"] == c) for c in CLASSES}
-    if min(per_class.values()) == 0:
-        print(f"[warn] 有空类别 {per_class}，模型会缺类；建议先补齐再训练")
+    present = [c for c in CLASSES if per_class[c] > 0]
+    if len(present) < 2:
+        print(f"[error] 状态模型至少需要 2 个类别，当前只有 {present}（{per_class}）")
+        print("        冷启动阶段一张种子图无法训练状态模型，先跑采集攒够类别再训")
+        return 2
+    if min(per_class[c] for c in present) < args.min_per_class:
+        print(f"[error] 类别样本不足 {args.min_per_class} 张: {per_class}")
+        return 2
+    if len(present) < len(CLASSES):
+        print(f"[warn] 缺少类别 {[c for c in CLASSES if c not in present]}，模型只覆盖 {present}")
 
     print(f"\n特征维度: {extract_features(trainable[0]['img']).shape[0]}  "
           f"(HOG + HSV)  增强倍数: {args.aug}")
@@ -396,7 +412,7 @@ def train(args):
     print("\n[2/2] 全量训练并保存…")
     X, y = [], []
     for s in trainable:
-        for v in augment(s["img"], np.random.default_rng(hash(s["path"]) % 2**32), n=args.aug):
+        for v in augment(s["img"], np.random.default_rng(stable_seed(s["path"])), n=args.aug):
             X.append(extract_features(v))
             y.append(s["label"])
     clf = SoftmaxClassifier().fit(X, y, epochs=args.epochs, verbose=True)
@@ -441,6 +457,8 @@ def main():
     ap.add_argument("--model", default=MODEL_PATH, help="模型输出/读取路径")
     ap.add_argument("--aug", type=int, default=8, help="每张样本增强倍数（含原图）")
     ap.add_argument("--epochs", type=int, default=400, help="训练轮数")
+    ap.add_argument("--min-per-class", type=int, default=1,
+                    help="每个出现的类别至少要有多少张样本（默认 1，冷启动可调高）")
     ap.add_argument("--dry-run", action="store_true", help="只评估不保存模型")
     ap.add_argument("--predict", metavar="IMG_OR_DIR", help="用已有模型预测图片或目录")
     ap.add_argument(

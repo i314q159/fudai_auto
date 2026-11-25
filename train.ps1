@@ -1,21 +1,25 @@
 # train.ps1 — 福袋模型一键训练（除采集外的全部训练）
 #
 # 一条命令完成：
-#   1) 检测模型  data\fudai\model\fudai_clf.npz    （fudai_auto.py 运行时用）
-#   2) 状态模型  data\fudai\model\fudai_state.npz  （待参与/已参与/倒计时 3 分类，分析用）
-#   3) 训练后打印两个模型的产物（大小/时间）
+#   1) 检测模型  data\fudai\model\fudai_clf.npz
+#      样本数 < -ColdStartBelow（默认 30）时走冷启动：用一张种子图 bootstrap
+#      样本数 >= 阈值时用全量样本训练
+#   2) 状态模型  data\fudai\model\fudai_state.npz  （≥2 类才允许训练）
+#   3) 训练后打印模型产物（大小/时间）
 #
 # 用法：
-#   .\train.ps1                          # 全部训练
-#   .\train.ps1 -DryRun                  # 两个模型都只评估，不写任何文件
+#   .\train.ps1                          # 全量训练（样本不足自动冷启动）
+#   .\train.ps1 -DryRun                  # 只评估，不写任何文件
+#   .\train.ps1 -ColdStartBelow 20       # 自定义冷启动阈值
+#   .\train.ps1 -Seed data\fudai\seed\seed_vgn.png  # 指定种子图
 #   .\train.ps1 -SkipState               # 只训检测模型
 #   .\train.ps1 -SkipDetector            # 只训状态模型
 #   .\train.ps1 -Aug 16 -Epochs 800      # 状态模型增强倍数/轮数
 #   .\train.ps1 -Predict data\fudai\icons # 用状态模型预测
-#   .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动全量重训（常驻）
+#   .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动重训（常驻）
 #
 # 采集仍由 fudai_auto.py 在运行时自动完成（data\fudai\icons + labels.csv）。
-# 重训后需重启 fudai_auto.py 才会加载新权重。
+# 重训后需重启 main.py 才会加载新权重。
 
 [CmdletBinding()]
 param(
@@ -29,6 +33,8 @@ param(
     [ValidateSet('pending', 'joined', 'countdown')]
     [string]$ExtraLabel = "",
     [string]$Python = "",
+    [int]$ColdStartBelow = 30,
+    [string]$Seed = "",
     [switch]$SkipDetector,
     [switch]$SkipState,
     [switch]$Watch,
@@ -41,6 +47,7 @@ try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new() } catch { }
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stateScript = Join-Path $root 'train_fudai.py'
 $detScript = Join-Path $root 'train_fudai_clf.py'
+$bootScript = Join-Path $root 'bootstrap_fudai_clf.py'
 $iconDir = Join-Path $root 'data\fudai\icons'
 $modelDir = Join-Path $root 'data\fudai\model'
 $detModel = Join-Path $modelDir 'fudai_clf.npz'
@@ -77,9 +84,30 @@ if (-not (Test-Path -LiteralPath $Python)) {
 
 function Invoke-Detector {
     param([switch]$Dry)
+    $count = Get-SampleCount
+    $seedPath = if ($Seed) { $Seed } else { Join-Path $root 'data\fudai\seed\seed_vgn.png' }
+
+    if ($count -lt $ColdStartBelow) {
+        Write-Host "`n=== [1] 冷启动（样本 $count < 阈值 $ColdStartBelow，用种子图 bootstrap） ===" -ForegroundColor Yellow
+        if ($Dry) {
+            Write-Host "  dry-run：跳过冷启动训练，不写模型" -ForegroundColor DarkGray
+            return 0
+        }
+        if (-not (Test-Path -LiteralPath $seedPath)) {
+            Write-Host "种子图不存在: $seedPath" -ForegroundColor Red
+            return 1
+        }
+        if (-not (Test-Path -LiteralPath $bootScript)) {
+            Write-Host "找不到 bootstrap_fudai_clf.py: $bootScript" -ForegroundColor Red
+            return 1
+        }
+        & $Python @($bootScript, '--seed', $seedPath, '--install') | Out-Host
+        return $LASTEXITCODE
+    }
+
     $a = @($detScript)
     if ($Dry) { $a += '--dry-run' }
-    Write-Host "`n=== [1] 检测模型 $(if ($Dry) { '(dry-run)' } else { $detModel }) ===" -ForegroundColor Cyan
+    Write-Host "`n=== [1] 检测模型（样本 $count ≥ 阈值 $ColdStartBelow） $(if ($Dry) { '(dry-run)' } else { $detModel }) ===" -ForegroundColor Cyan
     & $Python @a | Out-Host
     return $LASTEXITCODE
 }
@@ -121,6 +149,10 @@ function Invoke-All {
     }
     if (-not $SkipState) {
         $code = Invoke-State -Dry:$Dry
+        if ($code -eq 2) {
+            Write-Host "状态模型跳过：样本类别不足（冷启动阶段正常）" -ForegroundColor Yellow
+            return 0
+        }
         if ($code -ne 0) { Write-Host "状态模型训练失败（exit $code）" -ForegroundColor Yellow; return $code }
     }
     return 0

@@ -2,6 +2,9 @@
 """
 抖音直播间 福袋自动蹲守（adb + OpenCV + OCR）——不区分直播间，跟随当前屏幕直播间
 
+本文件：底层能力库（截图/OCR/福袋定位/面板处理/样本采集）
+主循环与 CLI 已迁到 main.py
+
 策略（不依赖「待参与」字样，避免卡在 00:00 错过新福袋）：
   每轮截图先 OCR 读取当前直播间标题，切换直播间后自动重置状态继续蹲
   每隔 N 秒打开一次福袋面板：
@@ -10,11 +13,10 @@
   读取面板倒计时，到点进入开奖观察窗口，识别中奖/未中奖并记录
   任何时刻都停留在直播间，不点关闭/返回
 日志与截图统一输出到 log/ 目录
-用法:
-  python fudai_auto.py --minutes 180 --interval 30
+用法：
+  python main.py --minutes 180 --interval 30
 """
 
-import argparse
 import csv
 import os
 import re
@@ -27,7 +29,7 @@ import numpy as np
 import fudai_feat
 from rapidocr_onnxruntime import RapidOCR
 
-SERIAL = "IB8XCEM7IJBAMZY5"
+SERIAL = os.getenv("FUDAI_SERIAL", "IB8XCEM7IJBAMZY5")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(ROOT, "log")
 SHOT_DIR = os.path.join(LOG_DIR, "shots")
@@ -219,9 +221,7 @@ def crop(img, roi):
     return img[roi[1] : roi[3], roi[0] : roi[2]]
 
 
-BAG_TPL_PATH = os.path.join(DATASET_DIR, "bag_template.png")
-if not os.path.exists(BAG_TPL_PATH):  # 兼容旧位置
-    BAG_TPL_PATH = next(
+BAG_TPL_PATH = next(
     (p for p in (os.path.join(DATASET_DIR, "bag_template.png"),
                  os.path.join(ROOT, "bag_template.png")) if os.path.exists(p)),
     os.path.join(ROOT, "bag_template.png"),
@@ -230,14 +230,28 @@ BAG_TPL = cv2.imread(BAG_TPL_PATH) if os.path.exists(BAG_TPL_PATH) else None
 TIME_RE = re.compile(r"\d{1,2}\s*[:：]\s*\d{2}")
 CLF_PATH = os.path.join(DATASET_DIR, "model", "fudai_clf.npz")
 CLF = None
-try:
-    if os.path.exists(CLF_PATH):
-        _m = np.load(CLF_PATH)
-        CLF = {"w": _m["w"].astype(np.float32),
-               "thresh": max(float(_m["thresh"]), 0.12),
-               "win_w": int(_m["win_w"]), "win_h": int(_m["win_h"])}
-except Exception:
+
+
+def load_clf():
+    """读取检测模型；换机/重训后可热重载，无需重启进程"""
+    global CLF
     CLF = None
+    try:
+        if os.path.exists(CLF_PATH):
+            _m = np.load(CLF_PATH)
+            CLF = {"w": _m["w"].astype(np.float32),
+                   "thresh": max(float(_m["thresh"]), 0.12),
+                   "win_w": int(_m["win_w"]), "win_h": int(_m["win_h"])}
+    except Exception:
+        CLF = None
+    return CLF
+
+
+def reload_clf():
+    return load_clf()
+
+
+load_clf()
 
 
 def clf_locate(img):
@@ -511,12 +525,28 @@ def save_dataset(img, cx, cy, label, src):
 
 
 def open_bag_panel(img):
-    """点击福袋图标（袋身上部，避开倒计时条），返回新截图或 None"""
+    """点击福袋图标（袋身上部，避开倒计时条），返回新截图或 None
+
+    注意：样本只在「点击后面板真正打开」时才写入数据集，
+    避免误检（券图标、头像等）污染训练数据。
+    """
     pos = find_bag(img)
     if not pos:
         return None, "no-icon"
     cx, cy, src = pos
-    # 采样训练数据
+    tap(cx, cy)
+    time.sleep(1.4)
+    img2 = shot()
+    if not panel_state(img2)[0]:
+        log(f"首次点击未打开面板({src})，重点一次 ({cx},{cy + 18})")
+        tap(cx, cy + 18)
+        time.sleep(1.4)
+        img2 = shot()
+    if not panel_state(img2)[0]:
+        log(f"未确认福袋面板，不写入样本 ({src})")
+        return img2, f"tap({int(cx)},{int(cy)}) {src} unverified"
+
+    # 面板已确认，才把这张图作为正样本入库
     try:
         roi_txt = texts_of(ocr(crop(img, ICON_ROI), 0.45))
         if "待参与" in roi_txt:
@@ -536,14 +566,6 @@ def open_bag_panel(img):
             log(f"已保存福袋样本: {os.path.basename(saved)} ({label})")
     except Exception as e:
         log(f"样本保存失败(忽略): {e}")
-    tap(cx, cy)
-    time.sleep(1.4)
-    img2 = shot()
-    if not panel_state(img2)[0]:
-        log(f"首次点击未打开面板({src})，重点一次 ({cx},{cy + 18})")
-        tap(cx, cy + 18)
-        time.sleep(1.4)
-        img2 = shot()
     return img2, f"tap({int(cx)},{int(cy)}) {src}"
 
 
@@ -577,210 +599,8 @@ def watch_result(seconds=80):
             log(f"等待开奖中… {t[:40]}")
         time.sleep(3)
 
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", type=float, default=180)
-    ap.add_argument("--interval", type=float, default=60, help="检查福袋的间隔秒数")
-    ap.add_argument(
-        "--room",
-        default="",
-        help="可选：期望的直播间标题关键字，留空则只跟随当前直播间",
-    )
-    ap.add_argument("--serial", default=None, help="adb 设备序列号")
-    args = ap.parse_args()
-
-    global SERIAL, RUN_LOG, ROOM_NAME
-    if args.serial:
-        SERIAL = args.serial
-    RUN_LOG = os.path.join(LOG_DIR, f"run_{datetime.now():%Y%m%d_%H%M%S}.log")
-
-    # 单实例锁，防止多个进程抢点击
-    import socket
-
-    lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        lock.bind(("127.0.0.1", 59999))
-        lock.listen(1)
-    except OSError:
-        log("已有实例在运行，本进程退出")
-        return
-
-    t_end = time.time() + args.minutes * 60
-    bag_count = 0
-    cycle_no = 0
-    next_draw_ts = 0.0
-    draw_watched = True
-    cur_room = None
-    room_warned = False
-    last_room_seen = time.time()
-    last_err_log = 0.0
-    last_rem = None
-    last_rem_ts = 0.0
-    cycle_count = 1
-
-    def track_cycle(rem):
-        """通过倒计时‘回跳’识别新一轮福袋"""
-        nonlocal last_rem, last_rem_ts, cycle_count
-        if rem is None:
-            return
-        now = time.time()
-        if last_rem is not None and last_rem_ts:
-            expect = max(0, last_rem - (now - last_rem_ts))
-            if rem > expect + 90:
-                cycle_count += 1
-                log(f"检测到新一轮福袋（第 {cycle_count} 轮），剩余 {rem}s 开奖")
-                log_csv("new_cycle", f"#{cycle_count} rem={rem}")
-        last_rem, last_rem_ts = rem, now
-
-    log(f"启动福袋蹲守 {args.minutes} 分钟，检查间隔 {args.interval}s")
-    log_csv("start", f"minutes={args.minutes} interval={args.interval}")
-
-    while time.time() < t_end:
-        try:
-            img = shot()
-        except Exception as e:
-            if time.time() - last_err_log > 30:
-                last_err_log = time.time()
-                log(f"截图异常(自动重试): {e}")
-                log_csv("shot_error", str(e)[:80])
-            time.sleep(10)
-            continue
-
-        cycle_no += 1
-
-        # 抓当前直播间名称：切换房间自动适配
-        name = get_room_name(img)
-        if name:
-            ROOM_NAME = name
-            last_room_seen = time.time()
-            if cur_room is None:
-                cur_room = name
-                log(f"当前直播间: {name}")
-                log_csv("room", name)
-                r = follow_anchor(img)
-                if r:
-                    log_csv("follow", f"{name} {r}")
-                    if r == "followed":
-                        img = shot()
-            elif name != cur_room:
-                log(
-                    f"直播间切换: {cur_room} -> {name}，状态已重置，开始在新直播间蹲福袋"
-                )
-                log_csv("room_switch", f"{cur_room} -> {name}")
-                cur_room = name
-                next_draw_ts = 0.0
-                draw_watched = True
-                last_rem = None
-                last_rem_ts = 0.0
-                cycle_count = 1
-                save(img, "room_switch")
-                time.sleep(2)
-                r = follow_anchor(img)
-                if r:
-                    log_csv("follow", f"{name} {r}")
-                continue
-            if args.room and args.room not in name and not room_warned:
-                log(
-                    f"提示: 当前直播间为「{name}」，与 --room「{args.room}」不一致；已按当前直播间继续"
-                )
-                room_warned = True
-        elif time.time() - last_room_seen > 180:
-            log("警告: 连续 3 分钟未识别到直播间标题，可能已离开直播间")
-            log_csv("warn_room", "no-title")
-            last_room_seen = time.time()
-            save(img, "no_room_title")
-
-        # 有开奖弹窗先记录
-        rt = texts_of(ocr(crop(img, RESULT_ROI), 0.45))
-        if any(k in rt for k in ("恭喜", "很遗憾", "未中奖", "中奖")):
-            save(img, "result_popup")
-            log(f"识别到开奖文案: {rt[:60]}")
-            log_csv("result", rt[:120])
-
-        # 面板是否已打开
-        st, t = panel_state(img)
-        if st:
-            status, rem, detail = handle_panel(img)
-            if status == "joined_now":
-                bag_count += 1
-                log(f"第 {bag_count} 次参与成功({detail})")
-                log_csv("join", f"{cur_room} #{bag_count} {detail} remaining={rem}")
-                if rem is not None:
-                    next_draw_ts = time.time() + rem
-                    draw_watched = False
-            elif rem is not None:
-                next_draw_ts = time.time() + rem
-                draw_watched = False
-            else:
-                next_draw_ts = time.time() + 750
-                draw_watched = False
-            if status == "need_payment":
-                log("该福袋需要付费（抖币），本房间不再自动点击，请手动处理")
-                log_csv("need_payment", f"{cur_room} {detail}")
-            track_cycle(rem)
-            time.sleep(1.0)
-        else:
-            # 打开福袋检查（未识别到直播间标题时跳过，避免在搜索页/桌面误点）
-            if not ROOM_NAME:
-                log("未识别到直播间标题，本轮跳过福袋检查")
-                time.sleep(args.interval)
-                continue
-            img2, info = open_bag_panel(img)
-            if img2 is None:
-                log(f"未见福袋图标: {info}")
-            else:
-                st2, _ = panel_state(img2)
-                if not st2:
-                    log(f"打开福袋后面板未识别，关闭 ({info})")
-                    close_panel()
-                else:
-                    status, rem, detail = handle_panel(img2)
-                    if status == "joined_now":
-                        bag_count += 1
-                        log(f"第 {bag_count} 次参与成功({detail})")
-                        log_csv(
-                            "join", f"{cur_room} #{bag_count} {detail} remaining={rem}"
-                        )
-                        if rem is not None:
-                            next_draw_ts = time.time() + rem
-                            draw_watched = False
-                    elif rem is not None:
-                        next_draw_ts = time.time() + rem
-                        draw_watched = False
-                        log(f"当前福袋已参与，剩余 {rem}s 开奖")
-                    else:
-                        next_draw_ts = time.time() + 750
-                        draw_watched = False
-                        log("未读到倒计时，按默认 12.5 分钟排开奖")
-                    if status == "need_payment":
-                        log("该福袋需要付费（抖币），已暂停自动点击，请手动处理")
-                        log_csv("need_payment", f"{cur_room} {detail}")
-                    track_cycle(rem)
-
-        # 开奖窗口
-        if (not draw_watched) and next_draw_ts and time.time() >= next_draw_ts - 3:
-            log(f"进入开奖观察窗口（第 {cycle_count} 轮）")
-            watch_result(90)
-            draw_watched = True
-
-        # 睡眠：按剩余时间自适应，临近开奖打短，避免错过开奖瞬间
-        gap = args.interval
-        if (not draw_watched) and last_rem is not None:
-            if last_rem > 600:
-                gap = 180
-            elif last_rem > 240:
-                gap = 90
-            else:
-                gap = max(20, args.interval)
-        sleep_s = gap
-        if (not draw_watched) and next_draw_ts:
-            sleep_s = max(1.5, min(sleep_s, next_draw_ts - time.time() - 2))
-        time.sleep(sleep_s)
-
-    log(f"结束，共参与 {bag_count} 次福袋")
-    log_csv("end", f"joined={bag_count}")
-
-
 if __name__ == "__main__":
-    main()
+    # 兼容旧入口：实际主循环已迁移到 main.py
+    from main import main as _main
+
+    _main()
