@@ -24,6 +24,7 @@ from datetime import datetime
 
 import cv2
 import numpy as np
+import fudai_feat
 from rapidocr_onnxruntime import RapidOCR
 
 SERIAL = "IB8XCEM7IJBAMZY5"
@@ -31,15 +32,23 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(ROOT, "log")
 SHOT_DIR = os.path.join(LOG_DIR, "shots")
 LOG_CSV = os.path.join(LOG_DIR, "fudai_log.csv")
+DATASET_DIR = os.path.join(ROOT, "data", "fudai")
+DATASET_ICONS = os.path.join(DATASET_DIR, "icons")
+DATASET_LABELS = os.path.join(DATASET_DIR, "labels.csv")
 os.makedirs(LOG_DIR, exist_ok=True)
 
-ICON_ROI = (0, 255, 400, 500)
+ROOM_NAME = None
+_dataset_state = {"ts": 0.0, "label": None, "crop": None}
+
+ICON_ROI = (0, 250, 420, 540)
 PANEL_ROI = (0, 2150, 1080, 2400)
 PANEL_HEAD_ROI = (760, 1560, 1080, 1690)  # 面板倒计时区域
 PANEL_HEAD_ROI_WIDE = (0, 1420, 1080, 1760)
 HEAD_ROI = (0, 95, 760, 230)
 NAME_ROI = (110, 105, 700, 175)  # 直播间标题行
 RESULT_ROI = (0, 600, 1080, 2000)
+FOLLOW_ROI = (390, 115, 720, 200)  # 主播「关注」按钮区域
+PAY_ROI = (0, 900, 1080, 2200)  # 付费弹窗检测区
 
 engine = RapidOCR()
 
@@ -210,13 +219,43 @@ def crop(img, roi):
     return img[roi[1] : roi[3], roi[0] : roi[2]]
 
 
-BAG_TPL_PATH = os.path.join(ROOT, "bag_template.png")
+BAG_TPL_PATH = os.path.join(DATASET_DIR, "bag_template.png")
+if not os.path.exists(BAG_TPL_PATH):  # 兼容旧位置
+    BAG_TPL_PATH = next(
+    (p for p in (os.path.join(DATASET_DIR, "bag_template.png"),
+                 os.path.join(ROOT, "bag_template.png")) if os.path.exists(p)),
+    os.path.join(ROOT, "bag_template.png"),
+)
 BAG_TPL = cv2.imread(BAG_TPL_PATH) if os.path.exists(BAG_TPL_PATH) else None
 TIME_RE = re.compile(r"\d{1,2}\s*[:：]\s*\d{2}")
+CLF_PATH = os.path.join(DATASET_DIR, "model", "fudai_clf.npz")
+CLF = None
+try:
+    if os.path.exists(CLF_PATH):
+        _m = np.load(CLF_PATH)
+        CLF = {"w": _m["w"].astype(np.float32),
+               "thresh": max(float(_m["thresh"]), 0.12),
+               "win_w": int(_m["win_w"]), "win_h": int(_m["win_h"])}
+except Exception:
+    CLF = None
+
+
+def clf_locate(img):
+    """用 data/fudai/model/fudai_clf.npz 在福袋区滑窗分类，返回最佳命中或 None"""
+    if CLF is None:
+        return None
+    hit = fudai_feat.locate(img, ICON_ROI, CLF, CLF["thresh"], stride=8)
+    if not hit:
+        return None
+    cx, cy, s = hit
+    return cx, cy, f"clf:{s:.2f}"
 
 
 def find_bag(img):
-    """定位福袋图标：模板匹配优先，失败则用 OCR 倒计时标签反推"""
+    """定位福袋图标：分类模型优先，其次模板匹配，最后用 OCR 倒计时标签反推"""
+    hit = clf_locate(img)
+    if hit:
+        return hit
     roi = crop(img, ICON_ROI)
     if BAG_TPL is not None:
         best = (0.0, None, None)
@@ -342,6 +381,8 @@ def panel_state(img):
     t = texts_of(ocr(roi, 0.45))
     if "一键发表评论" in t:
         return "join", t
+    if ("加入购物粉丝团" in t) or ("粉丝团并关注" in t) or ("关注主播" in t):
+        return "join", t
     if ("请勿离开直播间" in t) or ("等待开奖" in t) or ("任务已完成" in t):
         return "wait", t
     return None, t
@@ -352,43 +393,121 @@ def close_panel():
     time.sleep(0.8)
 
 
-def handle_panel(img):
-    """处理已打开的福袋面板，返回 (joinstatus, remaining, detail)"""
-    roi = crop(img, PANEL_ROI)
-    btn = pink_button_box(roi)
-    t = texts_of(ocr(roi, 0.45))
-    rem = read_remaining(img)
+def follow_anchor(img):
+    """检查主播关注按钮并关注（仅头部小区域，已关注则跳过）"""
+    items = ocr(crop(img, FOLLOW_ROI), 0.45)
+    t = texts_of(items)
+    if "已关注" in t:
+        return "already"
+    for i in items:
+        if "关注" in i["text"]:
+            cx = FOLLOW_ROI[0] + i["x"] + i["w"] / 2
+            cy = FOLLOW_ROI[1] + i["y"] + i["h"] / 2
+            tap(cx, cy)
+            time.sleep(1.2)
+            log(f"已点击关注主播 ({int(cx)},{int(cy)})")
+            return "followed"
+    return None
 
-    if btn:
-        _, x, y, w, h = btn
-        cx, cy = PANEL_ROI[0] + x + w // 2, PANEL_ROI[1] + y + h // 2
-        log(f"点「一键发表评论」完成福袋任务 ({cx},{cy})")
-        tap(cx, cy)
-        time.sleep(1.4)
-        p = shot()
-        save(p, "joined")
-        rem2 = read_remaining(p)
-        return "joined_now", rem2 or rem, "comment"
-    if "一键发表评论" in t:
-        for i in ocr(roi, 0.45):
-            if "一键发表评论" in i["text"]:
-                tap(
-                    PANEL_ROI[0] + i["x"] + i["w"] / 2,
-                    PANEL_ROI[1] + i["y"] + i["h"] / 2 + 30,
-                )
-                time.sleep(1.4)
-                p = shot()
-                save(p, "joined_text")
-                rem2 = read_remaining(p)
-                return "joined_now", rem2 or rem, "comment_text"
-    if ("请勿离开直播间" in t) or ("等待开奖" in t) or ("任务已完成" in t):
-        log(f"该福袋已是参与状态，等待开奖（剩余 {rem}s）")
-        close_panel()
-        return "already", rem, "wait"
-    log(f"面板状态未知: {t[:50]}")
-    save(img, "panel_unknown")
+
+def handle_panel(img):
+    """处理福袋面板：可连续完成多步任务（加入粉丝团/关注主播/发表评论）"""
+    rem = read_remaining(img)
+    clicked = []
+    steps = 0
+    while steps < 3:
+        roi = crop(img, PANEL_ROI)
+        btn = pink_button_box(roi)
+        t = texts_of(ocr(roi, 0.45))
+        rem = read_remaining(img) or rem
+
+        if btn:
+            _, x, y, w, h = btn
+            cx = PANEL_ROI[0] + x + w // 2
+            cy = PANEL_ROI[1] + y + h // 2
+            log(f"面板按钮「{t[:24]}」-> 点击 ({cx},{cy})")
+            tap(cx, cy)
+            time.sleep(1.5)
+            img = shot()
+            pay = texts_of(ocr(crop(img, PAY_ROI), 0.4))
+            if any(k in pay for k in ("抖币", "确认支付", "立即支付", "去支付")):
+                log(f"检测到付费确认界面，暂停不自动支付: {pay[:40]}")
+                save(img, "need_payment")
+                tap(540, 700)
+                time.sleep(0.6)
+                return "need_payment", rem, "payment"
+            steps += 1
+            clicked.append(t[:20])
+            continue
+
+        if ("请勿离开直播间" in t) or ("等待开奖" in t) or ("任务已完成" in t):
+            log(f"该福袋已参与，等待开奖（剩余 {rem}s）")
+            close_panel()
+            return ("joined_now" if clicked else "already"), rem, ";".join(clicked) or "wait"
+
+        # 兜底：确认类弹层（文字按钮不在底部粉色条位置）
+        wide_roi = (0, 1300, 1080, 2400)
+        wide_items = ocr(crop(img, wide_roi), 0.3)
+        hit = None
+        for kw in ("立即加入", "确认加入", "加入粉丝团", "确认关注", "立即关注"):
+            hit = next((i for i in wide_items if kw in i["text"]), None)
+            if hit:
+                break
+        if hit:
+            cx = hit["x"] + hit["w"] / 2
+            cy = wide_roi[1] + hit["y"] + hit["h"] / 2
+            log(f"兜底点击「{hit['text']}」({int(cx)},{int(cy)})")
+            tap(cx, cy)
+            time.sleep(1.5)
+            img = shot()
+            pay = texts_of(ocr(crop(img, PAY_ROI), 0.4))
+            if any(k in pay for k in ("抖币", "确认支付", "立即支付", "去支付")):
+                log("确认层触发付费，已暂停")
+                tap(540, 700)
+                return "need_payment", rem, "payment"
+            steps += 1
+            clicked.append(hit["text"][:16])
+            continue
+
+        log(f"面板已关闭，任务处理结束: {t[:40]}")
+        return ("joined_now" if clicked else "unknown"), rem, ";".join(clicked) or t[:40]
+
+    log("面板任务步骤已达上限，停止继续点击")
     close_panel()
-    return "unknown", rem, t[:40]
+    return ("joined_now" if clicked else "unknown"), rem, ";".join(clicked)
+
+
+def save_dataset(img, cx, cy, label, src):
+    """把成功识别到的福袋图标裁成样本，作为训练数据（节流 + 去重）"""
+    now = time.time()
+    st = _dataset_state
+    if st["label"] == label and now - st["ts"] < 60:
+        return None
+    x0 = max(0, int(cx) - 60)
+    y0 = max(0, int(cy) - 45)
+    x1 = min(img.shape[1], x0 + 120)
+    y1 = min(img.shape[0], y0 + 90)
+    crop_img = img[y0:y1, x0:x1].copy()
+    if crop_img.size == 0:
+        return None
+    if st["crop"] is not None and st["crop"].shape == crop_img.shape:
+        diff = float(np.mean(cv2.absdiff(crop_img, st["crop"])))
+        if diff < 2.0 and st["label"] == label:
+            return None
+    os.makedirs(DATASET_ICONS, exist_ok=True)
+    tag = re.sub(r"[^\w\u4e00-\u9fff]", "-", str(label))[:24]
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    p = os.path.join(DATASET_ICONS, f"{ts}_{tag}.png")
+    cv2.imwrite(p, crop_img)
+    new = not os.path.exists(DATASET_LABELS)
+    with open(DATASET_LABELS, "a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["time", "room", "label", "source", "bbox", "file"])
+        w.writerow([f"{datetime.now():%Y-%m-%d %H:%M:%S}", ROOM_NAME or "", label, src,
+                    f"{x0},{y0},{x1},{y1}", os.path.relpath(p, ROOT)])
+    st.update(ts=now, label=label, crop=crop_img)
+    return p
 
 
 def open_bag_panel(img):
@@ -397,6 +516,26 @@ def open_bag_panel(img):
     if not pos:
         return None, "no-icon"
     cx, cy, src = pos
+    # 采样训练数据
+    try:
+        roi_txt = texts_of(ocr(crop(img, ICON_ROI), 0.45))
+        if "待参与" in roi_txt:
+            label = "待参与"
+        elif "已参与" in roi_txt:
+            label = "已参与"
+        else:
+            m = TIME_RE.search(roi_txt)
+            if m:
+                label = m.group(0).replace(" ", "")
+            elif src.startswith("ocr:"):
+                label = src.split(":", 1)[1].replace(" ", "")
+            else:
+                label = "icon_only"
+        saved = save_dataset(img, cx, cy, label, src)
+        if saved:
+            log(f"已保存福袋样本: {os.path.basename(saved)} ({label})")
+    except Exception as e:
+        log(f"样本保存失败(忽略): {e}")
     tap(cx, cy)
     time.sleep(1.4)
     img2 = shot()
@@ -451,7 +590,7 @@ def main():
     ap.add_argument("--serial", default=None, help="adb 设备序列号")
     args = ap.parse_args()
 
-    global SERIAL, RUN_LOG
+    global SERIAL, RUN_LOG, ROOM_NAME
     if args.serial:
         SERIAL = args.serial
     RUN_LOG = os.path.join(LOG_DIR, f"run_{datetime.now():%Y%m%d_%H%M%S}.log")
@@ -513,11 +652,17 @@ def main():
         # 抓当前直播间名称：切换房间自动适配
         name = get_room_name(img)
         if name:
+            ROOM_NAME = name
             last_room_seen = time.time()
             if cur_room is None:
                 cur_room = name
                 log(f"当前直播间: {name}")
                 log_csv("room", name)
+                r = follow_anchor(img)
+                if r:
+                    log_csv("follow", f"{name} {r}")
+                    if r == "followed":
+                        img = shot()
             elif name != cur_room:
                 log(
                     f"直播间切换: {cur_room} -> {name}，状态已重置，开始在新直播间蹲福袋"
@@ -531,6 +676,9 @@ def main():
                 cycle_count = 1
                 save(img, "room_switch")
                 time.sleep(2)
+                r = follow_anchor(img)
+                if r:
+                    log_csv("follow", f"{name} {r}")
                 continue
             if args.room and args.room not in name and not room_warned:
                 log(
@@ -567,10 +715,17 @@ def main():
             else:
                 next_draw_ts = time.time() + 750
                 draw_watched = False
+            if status == "need_payment":
+                log("该福袋需要付费（抖币），本房间不再自动点击，请手动处理")
+                log_csv("need_payment", f"{cur_room} {detail}")
             track_cycle(rem)
             time.sleep(1.0)
         else:
-            # 打开福袋检查
+            # 打开福袋检查（未识别到直播间标题时跳过，避免在搜索页/桌面误点）
+            if not ROOM_NAME:
+                log("未识别到直播间标题，本轮跳过福袋检查")
+                time.sleep(args.interval)
+                continue
             img2, info = open_bag_panel(img)
             if img2 is None:
                 log(f"未见福袋图标: {info}")
@@ -598,6 +753,9 @@ def main():
                         next_draw_ts = time.time() + 750
                         draw_watched = False
                         log("未读到倒计时，按默认 12.5 分钟排开奖")
+                    if status == "need_payment":
+                        log("该福袋需要付费（抖币），已暂停自动点击，请手动处理")
+                        log_csv("need_payment", f"{cur_room} {detail}")
                     track_cycle(rem)
 
         # 开奖窗口
