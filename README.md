@@ -43,70 +43,87 @@ python -m venv .venv
 .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动全量重训（常驻）
 ```
 
-冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`bootstrap_fudai_clf.py`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。
+冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`bootstrap_fudai_clf.py`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。`main.py` 启动时也会做同样判断：没有检测模型且样本不足，会先 bootstrap 再热加载。
 
 | 文件 | 用途 | 训练脚本 |
 |---|---|---|
-| `data\fudai\model\fudai_clf.npz` | `fudai_auto.py` 运行时检测福袋位置 | `train_fudai_clf.py` |
+| `data\fudai\model\fudai_clf.npz` | 运行时检测福袋位置（`w/thresh/win_w/win_h`） | `train_fudai_clf.py` 或 `bootstrap_fudai_clf.py` |
 | `data\fudai\model\fudai_state.npz` | 3 分类状态（待参与/已参与/倒计时），只做分析 | `train_fudai.py` |
 
-重训检测模型后需要重启 `fudai_auto.py` 才会加载新权重。
+重训后下次启动 `main.py` 时加载新权重；冷启动路径会当场调用 `reload_clf()` 热加载。
+
+## 换机复现
+
+仓库里只放代码、模板图和文档。`data/fudai/icons`、`labels.csv`、`seed/`、`model/` 都在 `.gitignore` 里，**本机训练产物不提交**，所以换机后有两种恢复方式：
+
+```powershell
+git clone git@github.com:i314q159/fudai_auto.git
+cd fudai_auto
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+adb devices                       # 确认设备已授权
+```
+
+- **只要流程能跑**：直接启动 `main.py`。检测模型缺失且样本 <30 时，会自动找 `data/fudai/seed/` 下的种子图做 bootstrap；没有种子图会在日志里明确报错。
+- **要接着原来的数据练**：把旧机器的整个 `data/fudai/` 拷过来（icons、labels.csv、seed、model 一起），再按需跑 `.\train.ps1`。
+- 手机换了：`--serial` 或环境变量 `FUDAI_SERIAL` 覆盖；分辨率仍按 1080×2400 的 ROI 设计，换分辨率要改 `fudai_auto.py` 顶部 ROI。
 
 ## 流程图
 
-训练数据流与运行时加载：
+采集 → 训练（冷启动 / 全量）→ 模型装配：
 
-![训练数据流与运行时加载](docs/pipeline.png)
+![采集、训练与装配](docs/pipeline.png)
 
-运行时单轮循环：
+`main.py` 入口与单轮巡检循环：
 
-![运行时单轮循环](docs/runtime_loop.png)
+![运行时入口与单轮循环](docs/runtime_loop.png)
 
 图片由 `docs/make_flowchart.py` 生成（PIL + 微软雅黑），流程变了重跑一次脚本即可更新。
 
 ## 工作机制
 
-1. 每轮截图，先 OCR 直播间标题：切了直播间会记录 `直播间切换: A -> B` 并重置状态继续蹲。
-2. 定位福袋浮标：优先用 `data/fudai/model/fudai_clf.npz`（HOG+颜色直方图线性分类器）在左上角区域滑窗打分，命中分 ≥0.12 即视为福袋；模型缺失时回退模板匹配 / OCR 倒计时反推。
-3. 打开福袋面板：
+1. 每轮截图，先 OCR 直播间标题：首见点一次主播「关注」；切房记 `直播间切换: A -> B`，重置轮次/开奖时间/关注状态继续蹲；连续 3 分钟无标题会警告并跳过福袋检查。
+2. 面板已打开则直接处理任务；否则在左上角定位福袋浮标：优先用 `fudai_clf.npz`（HOG+颜色直方图线性分类器）滑窗打分，命中分 ≥0.12 即视为福袋；模型缺失/打分失败回退模板匹配、OCR 倒计时反推。
+3. 打开福袋面板后最多连点 3 步，每步都重新截图再判定：
    - 出现「一键发表评论」→ 点击完成福袋任务
    - 出现「加入购物粉丝团并关注主播」→ 点击加入粉丝团并关注，成功后同面板继续点「一键发表评论」，一次完成两步任务
-   - 出现抖币/支付确认 → 不自动支付，记 `need_payment` 并退出面板
+   - 出现抖币/支付确认 → 不自动支付，记 `need_payment` 并停手
    - 显示「任务已完成 等待开奖」→ 已参与，关闭面板继续
-4. 切换直播间后自动点一次主播「关注」（已关注则跳过）。
-5. 读面板倒计时排开奖时间；临近开奖进 90 秒观察窗口，识别「中奖 / 未中奖」并记录。
-6. 自适应节奏：剩余 >10 分钟每 3 分钟查一次，>4 分钟每 90 秒，临近开奖加密到 30 秒内。
+4. 只有面板确认参与成功才裁 120×90 图标入训练集，防止误检污染数据。
+5. 读面板倒计时排开奖时间；倒计时“回跳”识别新一轮福袋；临近开奖进 90 秒观察窗口，识别「中奖 / 未中奖」并记录。
+6. 自适应节奏：剩余 >10 分钟每 3 分钟查一次，>4 分钟每 90 秒，临近开奖加密到 30 秒内，并保证不越过开奖时刻。
 7. 常亮保护：脚本外已设置 `screen_off_timeout` 最大、`stay_on_while_plugged_in`；截图失败会自动重连 adb、重启 adb server、退回 shell+pull。
 
 ## 目录与输出
 
 ```
-fudai_auto.py        主脚本
-fudai_feat.py        分类器特征（HOG+HSV）与滑窗打分，训练/推理共用
+main.py              运行入口：CLI / 单实例锁 / 冷启动判断 / 主循环
+fudai_auto.py        底层能力库：截图、OCR、定位、面板、采集、watch_result
+fudai_feat.py        HOG+HSV 特征与滑窗打分，训练/推理共用
+bootstrap_fudai_clf.py  一张种子图冷启动 -> fudai_clf.npz
 train_fudai_clf.py   检测模型训练 -> data/fudai/model/fudai_clf.npz
 train_fudai.py       状态模型训练（3 分类 + LOO 评估）-> fudai_state.npz
-train.ps1            一键训练/预测/常驻重训（封装上面两个 py）
-bag_template.png     福袋图标模板（模型缺失时兜底）
+train.ps1            一键训练/预测/常驻重训（含冷启动阈值）
+data/fudai/bag_template.png  福袋图标模板（模型缺失时兜底，已入库）
 requirements.txt     依赖
 log/                 运行日志与截图
 log/run_*.log        每次运行的文本日志
-log/fudai_log.csv    参与/开关播/开奖结果记录
+log/fudai_log.csv    参与/切房/开奖结果记录
 log/shots/           关键节点截图（同时作为检测模型负样本来源）
-data/fudai/          福袋识别训练集（每识别到一次福袋裁一张图标样本）
+data/fudai/          福袋识别训练集（本机产物，不入库）
 data/fudai/icons/    图标样本 png（120x90，以福袋主体为中心）
 data/fudai/labels.csv 样本标注（时间/直播间/标签/来源/bbox）
-data/fudai/model/fudai_clf.npz    检测模型（运行时用，w/thresh/窗口尺寸）
-data/fudai/model/fudai_state.npz  状态模型（分析用，W/b/mean/std/classes）
-data/fudai/model/train_report.txt 检测模型训练报告
+data/fudai/seed/     冷启动种子图（不入库）
+data/fudai/model/    检测/状态模型与训练报告（不入库）
 docs/make_flowchart.py            流程图生成脚本（PIL）
-docs/pipeline.png                 训练数据流 / 模型加载图
-docs/runtime_loop.png             运行时单轮循环图
+docs/pipeline.png                 采集 / 训练 / 装配图
+docs/runtime_loop.png             运行时入口与循环图
 .venv/               虚拟环境
 ```
 
 样本采集规则：同一状态（待参与/已参与/倒计时）60 秒内只存一张，并对像素做去重；标签取图标下方 OCR 文字（待参与、已参与或倒计时）。
 
-重新训练：`.venv\Scripts\python.exe train_fudai_clf.py`（会自动把 `log/shots` 里的截图当负样本，避开真实福袋框）。样本多了以后重训即可，主脚本重启后自动加载新模型。
+重新训练优先用 `.\train.ps1`（自动汇总样本与负样本、生成报告）；脚本内部等价于分别跑 `train_fudai_clf.py` 和 `train_fudai.py`。样本多了以后重训即可，重启 `main.py` 自动加载新模型。
 
 ## 注意
 

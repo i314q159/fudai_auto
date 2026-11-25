@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""生成 README 用流程图（PIL 绘制，中文用微软雅黑）"""
+"""生成 README 用流程图（PIL 绘制，中文用微软雅黑）
+
+两张图：
+  docs/pipeline.png      采集 → 训练（冷启动 / 全量）→ 模型装配
+  docs/runtime_loop.png  main.py 入口与单轮巡检循环
+"""
 import os
 
 from PIL import Image, ImageDraw, ImageFont
@@ -20,6 +25,8 @@ ORANGE = (217, 119, 6)
 ORANGE_BG = (254, 243, 226)
 GRAY = (120, 128, 140)
 GRAY_BG = (240, 242, 245)
+RED = (190, 55, 55)
+RED_BG = (252, 235, 235)
 LINE = (70, 78, 90)
 
 
@@ -46,19 +53,10 @@ def wrap(d, s, font, max_w):
     return out
 
 
-def box(d, xy, title, body, accent, bg, title_font, body_font, dashed=False):
+def box(d, xy, title, body, accent, bg, title_font, body_font):
     x0, y0, x1, y1 = xy
     d.rounded_rectangle(xy, radius=18, fill=bg, outline=accent, width=3)
-    if dashed:
-        step = 14
-        for x in range(x0 + 8, x1 - 8, step):
-            d.line([(x, y0), (min(x + 7, x1), y0)], fill=accent, width=3)
-            d.line([(x, y1), (min(x + 7, x1), y1)], fill=accent, width=3)
-        for y in range(y0 + 8, y1 - 8, step):
-            d.line([(x0, y), (x0, min(y + 7, y1))], fill=accent, width=3)
-            d.line([(x1, y), (x1, min(y + 7, y1))], fill=accent, width=3)
-
-    lines = wrap(d, body, body_font, x1 - x0 - 40)
+    lines = wrap(d, body, body_font, x1 - x0 - 36)
     th = text_size(d, title, title_font)[1]
     bh = text_size(d, "汉", body_font)[1] + 10
     total = th + 12 + len(lines) * bh
@@ -68,6 +66,15 @@ def box(d, xy, title, body, accent, bg, title_font, body_font, dashed=False):
     for i, ln in enumerate(lines):
         w = text_size(d, ln, body_font)[0]
         d.text(((x0 + x1 - w) / 2, cy + th + 14 + i * bh), ln, font=body_font, fill=INK)
+
+
+def diamond(d, cx, cy, w, h, title, body, title_font, body_font, accent=GRAY, bg=GRAY_BG):
+    pts = [(cx, cy - h / 2), (cx + w / 2, cy), (cx, cy + h / 2), (cx - w / 2, cy)]
+    d.polygon(pts, fill=bg, outline=accent, width=3)
+    tw = text_size(d, title, title_font)[0]
+    d.text((cx - tw / 2, cy - 38), title, font=title_font, fill=INK)
+    bw = text_size(d, body, body_font)[0]
+    d.text((cx - bw / 2, cy + 8), body, font=body_font, fill=MUTED)
 
 
 def arrow(d, p0, p1, color=LINE, width=4, dashed=False, head=14):
@@ -98,52 +105,79 @@ def label(d, xy, s, font, color=MUTED, anchor="mm"):
 
 
 def pipeline():
-    W, H = 2200, 1420
+    W, H = 2400, 1840
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
-    ft = f(52, True)
-    fs = f(28)
+    ft = f(50, True)
+    fs = f(27)
     fb = f(26, True)
-    fbd = f(24)
-    label(d, (60, 60), "福袋模型：训练数据流与运行时加载", ft, INK, "la")
-    label(d, (60, 132), "采集在 fudai_auto.py 运行时自动完成；训练统一走 train.ps1", fs, MUTED, "la")
+    fbd = f(23)
+    label(d, (60, 55), "福袋模型：采集、训练与装配", ft, INK, "la")
+    label(d, (60, 125), "采集在运行主循环里自动完成；训练统一入口 train.ps1，样本不足走种子图冷启动", fs, MUTED, "la")
 
-    box(d, (740, 190, 1460, 320), "fudai_auto.py 运行时主程序",
-        "adb 截图 / 点击 · OCR · 开奖识别 · 样本采集", BLUE, BLUE_BG, fb, fbd)
-    box(d, (600, 420, 1600, 610), "data/fudai + log/shots",
-        "icons/*.png  120×90 图标样本\nlabels.csv  时间 / 房间 / 标签 / 来源 / bbox\nshots/*.png  关键节点截图（负样本来源）",
+    # 采集
+    box(d, (700, 180, 1700, 340), "采集：main.py 主循环 → fudai_auto.py",
+        "adb 截图定位福袋 → 打开面板 → 确认参与成功才采集\n裁 120×90 图标，同状态 60s 节流 + 像素差去重",
+        BLUE, BLUE_BG, fb, fbd)
+    # 训练入口
+    box(d, (1840, 180, 2340, 340), "train.ps1 统一入口",
+        "默认冷启动阈值 30\n-ColdStartBelow / -Seed\n-DryRun / -SkipState", GREEN, GREEN_BG, fb, fbd)
+    # 数据
+    box(d, (620, 430, 1780, 660), "data/fudai + log/shots",
+        "icons/*.png  120×90 福袋图标（正样本）\nlabels.csv  时间 / 房间 / 标签 / 来源 / bbox\nlog/shots/*.png  关键节点截图（负样本来源）",
         ORANGE, ORANGE_BG, fb, fbd)
-    arrow(d, (1100, 320), (1100, 420))
-    label(d, (1124, 370), "每识别到一次福袋", fs, MUTED, "lm")
+    arrow(d, (760, 340), (760, 430))
+    label(d, (784, 375), "识别即入集", fs, MUTED, "lm")
+    arrow(d, (1780, 545), (1900, 545), GRAY, 3, dashed=True, head=12)
+    d.line([(1900, 545), (1900, 340)], fill=GRAY, width=3)
+    d.polygon([(1900, 340), (1893, 354), (1907, 354)], fill=GRAY)
+    label(d, (1822, 522), "读取", f(23), MUTED)
 
-    box(d, (500, 760, 1040, 960), "train_fudai_clf.py 检测模型",
-        "HOG + HSV 特征 → 线性判别\n正样本：icons 按粉色主体重裁 + 增强\n负样本：shots 滑窗，避开真实福袋框",
+    # 决策
+    diamond(d, 1200, 830, 560, 210, "样本数 ≥ 阈值？", "icons 计数（默认 30）", fb, fbd)
+    arrow(d, (1200, 660), (1200, 725))
+    label(d, (1224, 692), "分类决策", fs, MUTED, "lm")
+
+    # 冷启动分支
+    box(d, (160, 1010, 920, 1250), "bootstrap_fudai_clf.py 冷启动",
+        "种子图 → 粉色主体定位 → 7 正 + 120 负\n强正则线性判别，自评 F1 选阈值 → --install\n输出 fudai_clf.npz，旧模型备份 .prev",
+        ORANGE, ORANGE_BG, fb, fbd)
+    arrow(d, (920, 830), (540, 830), GRAY, 4)
+    arrow(d, (540, 830), (540, 1010), GRAY, 4)
+    label(d, (740, 800), "否（样本太少）", fs, MUTED)
+
+    # 全量分支
+    box(d, (1000, 1010, 1500, 1210), "train_fudai_clf.py 检测模型",
+        "HOG + HSV 特征 → 线性判别\n正样本：重裁 + 增强\n负样本：shots 滑窗避开真实框",
         GREEN, GREEN_BG, fb, fbd)
-    box(d, (1160, 760, 1700, 960), "train_fudai.py 状态模型",
-        "softmax 3 分类：待参与 / 已参与 / 倒计时\n增强 8×，类别加权\nLeave-One-Out 交叉验证评估",
+    box(d, (1560, 1010, 2160, 1210), "train_fudai.py 状态模型",
+        "softmax 3 分类\n待参与 / 已参与 / 倒计时\n类别 < 2 自动跳过",
         GREEN, GREEN_BG, fb, fbd)
-    arrow(d, (840, 610), (840, 760))
-    label(d, (864, 685), "正样本 + 增强", fs, MUTED, "lm")
-    arrow(d, (1420, 610), (1420, 760))
-    label(d, (1444, 685), "截图当负样本", fs, MUTED, "lm")
+    arrow(d, (1480, 830), (1860, 830))
+    d.line([(1860, 830), (1860, 960), (1250, 960)], fill=LINE, width=4)
+    arrow(d, (1250, 960), (1250, 1010))
+    arrow(d, (1860, 960), (1860, 1010))
+    label(d, (1600, 800), "是（全量训练）", fs, MUTED)
 
-    box(d, (500, 1090, 1040, 1260), "data/fudai/model/fudai_clf.npz",
-        "w / thresh / win_w / win_h\n运行时检测福袋位置（唯一在用模型）", BLUE, BLUE_BG, fb, fbd)
-    box(d, (1160, 1090, 1700, 1260), "data/fudai/model/fudai_state.npz",
-        "W / b / mean / std / classes\n仅做状态分析，不参与运行", GRAY, GRAY_BG, fb, fbd)
-    arrow(d, (770, 960), (770, 1090))
-    arrow(d, (1430, 960), (1430, 1090))
+    # 模型产物
+    box(d, (1000, 1340, 1500, 1500), "data/fudai/model/fudai_clf.npz",
+        "w / thresh / win_w / win_h\n120×90 滑窗打分，运行时唯一主检测器", BLUE, BLUE_BG, fb, fbd)
+    box(d, (1560, 1340, 2160, 1500), "data/fudai/model/fudai_state.npz",
+        "W / b / mean / std / classes\n只做状态分析，不阻断检测", GRAY, GRAY_BG, fb, fbd)
+    arrow(d, (1250, 1210), (1250, 1340))
+    arrow(d, (1860, 1210), (1860, 1340))
 
-    box(d, (60, 790, 430, 940), "fudai_feat.py（共用）",
-        "HOG + HSV 特征\n滑窗打分 locate()\n训练与推理同一套实现", GRAY, GRAY_BG, fb, fbd, dashed=True)
-    arrow(d, (430, 865), (500, 865), GRAY, 3, dashed=True, head=12)
+    # 装配
+    box(d, (700, 1580, 2100, 1760), "main.py 启动装配",
+        "load_clf() 加载检测模型；无模型且样本 < 阈值 → 自动 bootstrap + reload_clf()\n检测优先，失败回退模板匹配 / OCR；换机：git clone + 放回 data（样本 / 模型不入库）",
+        BLUE, BLUE_BG, fb, fbd)
+    arrow(d, (540, 1250), (540, 1610))
+    arrow(d, (540, 1610), (700, 1610))
+    label(d, (566, 1430), "安装 / 热加载", fs, MUTED, "lm")
+    arrow(d, (1250, 1500), (1250, 1580))
+    arrow(d, (1860, 1500), (1860, 1580))
 
-    pts = [(1000, 1260), (1000, 1320), (2010, 1320), (2010, 255), (1460, 255)]
-    for a, b in zip(pts[:-1], pts[1:]):
-        arrow(d, a, b, GRAY, 3, dashed=True, head=12)
-    label(d, (1750, 1295), "启动时加载，重训后需重启", fs, MUTED, "mm")
-
-    label(d, (60, 1380), "实线 = 数据流    虚线 = 依赖 / 复用 / 加载关系", f(24), MUTED, "la")
+    label(d, (60, 1800), "实线 = 数据 / 产物    虚线 = 依赖 / 复用    橙色 = 冷启动路径（样本不足时）", f(23), MUTED, "la")
     os.makedirs(OUT, exist_ok=True)
     p = os.path.join(OUT, "pipeline.png")
     img.save(p)
@@ -151,55 +185,83 @@ def pipeline():
 
 
 def runtime_loop():
-    W, H = 2200, 1560
+    W, H = 2400, 2150
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
-    ft = f(52, True)
-    fs = f(28)
-    fb = f(27, True)
-    fbd = f(25)
-    label(d, (60, 60), "运行时：单轮循环（fudai_auto.py）", ft, INK, "la")
+    ft = f(50, True)
+    fs = f(27)
+    fb = f(26, True)
+    fbd = f(23)
+    label(d, (60, 45), "运行时：入口与单轮巡检循环（main.py + fudai_auto.py）", ft, INK, "la")
+    label(d, (60, 115), "不绑定直播间：抓当前屏幕标题，换房自动重置状态并关注；每次命中都从最新截图重新识别", fs, MUTED, "la")
 
-    box(d, (640, 150, 1300, 270), "截图", "adb exec-out screencap，失败自动重连 / 重启 adb", BLUE, BLUE_BG, fb, fbd)
-    box(d, (640, 340, 1300, 500), "OCR 直播间标题", "房间变了 → 重置轮次、开奖时间、关注状态\n新房间点一次主播「关注」", ORANGE, ORANGE_BG, fb, fbd)
-    arrow(d, (970, 270), (970, 340))
+    # 入口
+    box(d, (900, 160, 1700, 320), "main.py 启动",
+        "venv 启动 · 单实例锁 127.0.0.1:59999\n--minutes / --interval / --cold-start-below · FUDAI_SERIAL 覆盖串口",
+        BLUE, BLUE_BG, fb, fbd)
+    box(d, (900, 400, 1700, 610), "加载检测模型（ensure_model）",
+        "load_clf() 加载 fudai_clf.npz\n无模型且样本 < 阈值（默认 30）→ bootstrap + reload_clf()\n日志标明当前模型来源，失败回退模板匹配",
+        BLUE, BLUE_BG, fb, fbd)
+    arrow(d, (1300, 320), (1300, 400))
 
-    cx, cy, dw, dh = 970, 620, 420, 160
-    d.polygon([(cx, cy - dh / 2), (cx + dw / 2, cy), (cx, cy + dh / 2), (cx - dw / 2, cy)],
-              fill=GRAY_BG, outline=GRAY, width=3)
-    label(d, (cx, cy - 22), "面板已打开？", fb, INK)
-    label(d, (cx, cy + 26), "福袋面板 / 福袋任务", fbd, MUTED)
-    arrow(d, (970, 500), (970, 540))
+    # 每轮
+    box(d, (900, 690, 1700, 860), "每轮：截图",
+        "adb exec-out screencap；异常 → 重连 adb / shell+pull 兜底\n连续异常只记一条日志，10s 后重试", BLUE, BLUE_BG, fb, fbd)
+    arrow(d, (1300, 610), (1300, 690))
+    label(d, (1324, 650), "开始巡检", fs, MUTED, "lm")
 
-    box(d, (1500, 540, 2080, 700), "检测福袋浮标",
-        "fudai_clf.npz 滑窗打分 ≥ 0.12\n失败回退模板匹配 / OCR 倒计时", GREEN, GREEN_BG, fb, fbd)
-    arrow(d, (1180, 620), (1500, 620))
-    label(d, (1340, 592), "否", fs, MUTED)
+    box(d, (900, 930, 1700, 1150), "1. OCR 直播间标题并跟随",
+        "首见 → 点一次主播「关注」；名称变化 → 重置轮次 / 开奖时间 / 关注\n连续 3 分钟无标题 → 警告并跳过福袋检查（防在搜索页误点）",
+        ORANGE, ORANGE_BG, fb, fbd)
+    arrow(d, (1300, 860), (1300, 930))
 
-    box(d, (1500, 780, 2080, 920), "点开福袋面板", "点图标 → 面板从底部弹出", GREEN, GREEN_BG, fb, fbd)
-    arrow(d, (1790, 700), (1790, 780))
+    # 面板判定
+    diamond(d, 1300, 1330, 520, 180, "福袋面板已打开？", "底部面板 / 福袋任务文案", fb, fbd)
+    arrow(d, (1300, 1150), (1300, 1240))
 
-    box(d, (520, 780, 1180, 960), "连续点面板粉色按钮",
-        "加入购物粉丝团并关注主播 / 一键发表评论\n出现抖币、支付字样 → 停手并记 need_payment", BLUE, BLUE_BG, fb, fbd)
-    arrow(d, (760, 700), (760, 780))
-    label(d, (700, 726), "是", fs, MUTED)
-    arrow(d, (1500, 850), (1180, 850))
+    # 是
+    box(d, (300, 1520, 1150, 1770), "分支 A：handle_panel() 连续参与",
+        "最多 3 步，每次点完重新截图再判定\n加入购物粉丝团并关注 → 一键发表评论\n出现抖币 / 确认支付 → 停手，记 need_payment",
+        RED, RED_BG, fb, fbd)
+    arrow(d, (1040, 1330), (725, 1330))
+    d.line([(725, 1330), (725, 1520)], fill=LINE, width=4)
+    label(d, (880, 1300), "是", fs, MUTED)
 
-    box(d, (520, 1040, 1180, 1200), "读剩余秒数 + 采集样本",
-        "倒计时排下次开奖时间\n每次命中裁 120×90 存入 data/fudai/icons", ORANGE, ORANGE_BG, fb, fbd)
-    arrow(d, (850, 960), (850, 1040))
+    # 否
+    box(d, (1450, 1520, 2300, 1790), "分支 B：open_bag_panel() 找新福袋",
+        "模型定位图标 ≥ 0.12 → 点击 → 面板确认\n面板未识别 → close_panel()；确认成功才裁 120×90 入库\n未见图标 → no-icon，等下一轮，不卡 00:00",
+        GREEN, GREEN_BG, fb, fbd)
+    arrow(d, (1560, 1330), (1875, 1330))
+    d.line([(1875, 1330), (1875, 1520)], fill=LINE, width=4)
+    label(d, (1710, 1300), "否", fs, MUTED)
+    arrow(d, (1450, 1655), (1150, 1655), GRAY, 3, dashed=True, head=12)
+    label(d, (1300, 1618), "复用 handle_panel()", f(22), MUTED)
 
-    box(d, (520, 1280, 1180, 1430), "到点进开奖观察窗口",
-        "识别「中奖 / 未中奖 / 很遗憾」\n结果写入 log/fudai_log.csv", ORANGE, ORANGE_BG, fb, fbd)
-    arrow(d, (850, 1200), (850, 1280))
+    # 收尾
+    box(d, (500, 1860, 1900, 2050), "汇总：读倒计时 → 排开奖 → 自适应休眠",
+        "rem → next_draw_ts；倒计时「回跳」识别新一轮福袋\n>600s 睡 180s · >240s 睡 90s · 临近开奖 ≤30s · 到点 watch_result(90)\n结果与参与记录写 log/fudai_log.csv",
+        ORANGE, ORANGE_BG, fb, fbd)
+    arrow(d, (725, 1770), (725, 1860))
+    arrow(d, (1875, 1790), (1875, 1860))
 
-    pts = [(520, 1355), (300, 1355), (300, 210), (640, 210)]
-    for a, b in zip(pts[:-1], pts[1:]):
-        arrow(d, a, b, GRAY, 3, dashed=True, head=12)
-    label(d, (310, 1040), "继续下一轮", f(26), MUTED, "lm")
-    label(d, (310, 1080), "不离开直播间", f(24), MUTED, "lm")
+    # 回环
+    d.line([(500, 1955), (60, 1955), (60, 240), (900, 240)], fill=GRAY, width=3)
+    d.polygon([(900, 240), (886, 233), (886, 247)], fill=GRAY)
+    label(d, (78, 700), "下一轮（不离开直播间）", f(24), MUTED, "lm")
 
-    label(d, (60, 1510), "蓝色 = 交互动作    绿色 = 检测 / 打开面板    橙色 = 状态记录", f(24), MUTED, "la")
+    # 侧注
+    box(d, (150, 400, 780, 610), "运行前提",
+        "手机 1080×2400，抖音 com.ss.android.ugc.aweme\nadb 已授权；串口可用 FUDAI_SERIAL 覆盖",
+        GRAY, GRAY_BG, fb, fbd)
+    box(d, (150, 930, 780, 1150), "产物目录 log/",
+        "run_*.log 运行日志\nfudai_log.csv 参与 / 开奖 / 切房记录\nshots/*.png 关键节点截图",
+        GRAY, GRAY_BG, fb, fbd)
+    box(d, (1800, 690, 2340, 880), "开奖弹窗先记录",
+        "OCR 到「恭喜 / 很遗憾 / 中奖」\n→ 存图 + 写 csv，再继续巡检",
+        GRAY, GRAY_BG, fb, fbd)
+    arrow(d, (1700, 775), (1800, 775), GRAY, 3, dashed=True, head=12)
+
+    label(d, (60, 2110), "蓝色 = 入口 / 采集    橙色 = 状态与调度    红色 = 参与动作    绿色 = 搜索与打开    虚线 = 复用 / 旁路", f(23), MUTED, "la")
     os.makedirs(OUT, exist_ok=True)
     p = os.path.join(OUT, "runtime_loop.png")
     img.save(p)
