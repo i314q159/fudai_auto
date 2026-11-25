@@ -193,7 +193,7 @@ def runtime_loop():
     fb = f(26, True)
     fbd = f(23)
     label(d, (60, 45), "运行时：入口与单轮巡检循环（main.py + fudai_auto.py）", ft, INK, "la")
-    label(d, (60, 115), "不绑定直播间：抓当前屏幕标题，换房自动重置状态并关注；每次命中都从最新截图重新识别", fs, MUTED, "la")
+    label(d, (60, 115), "标题变化只记录、暂不自动切房；每次命中都从最新截图重新识别", fs, MUTED, "la")
 
     # 入口
     box(d, (900, 160, 1700, 320), "main.py 启动",
@@ -211,8 +211,8 @@ def runtime_loop():
     arrow(d, (1300, 610), (1300, 690))
     label(d, (1324, 650), "开始巡检", fs, MUTED, "lm")
 
-    box(d, (900, 930, 1700, 1150), "1. OCR 直播间标题并跟随",
-        "首见 → 点一次主播「关注」；名称变化 → 重置轮次 / 开奖时间 / 关注\n超过阈值无标题 → 警告并跳过福袋检查（防在搜索页误点）",
+    box(d, (900, 930, 1700, 1150), "1. OCR 直播间标题（只记录变化）",
+        "首见 → 点一次主播「关注」；标题变化只写 room_title_change\n暂不重置轮次 / 开奖时间，也不自动关注新主播\n超过阈值无标题 → 警告并跳过福袋检查（防在搜索页误点）",
         ORANGE, ORANGE_BG, fb, fbd)
     arrow(d, (1300, 860), (1300, 930))
 
@@ -255,7 +255,7 @@ def runtime_loop():
         "手机 1080×2400，抖音 com.ss.android.ugc.aweme\nadb 已授权；串口可用 FUDAI_SERIAL 覆盖",
         GRAY, GRAY_BG, fb, fbd)
     box(d, (150, 930, 780, 1150), "产物目录 log/",
-        "run_*.log 运行日志\nfudai_log.csv 参与 / 开奖 / 切房记录\nshots/*.png 关键节点截图",
+        "run_*.log 运行日志\nfudai_log.csv 参与 / 标题变化 / 开奖记录\nshots/*.png 关键节点截图",
         GRAY, GRAY_BG, fb, fbd)
     box(d, (1800, 690, 2340, 880), "开奖弹窗先记录",
         "OCR 到「恭喜 / 很遗憾 / 中奖」\n→ 存图 + 写 csv，再继续巡检",

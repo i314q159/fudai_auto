@@ -41,8 +41,7 @@ python -m venv .venv
 | `[detect]` | `shot_retry_seconds` | 10 | 截图异常后的重试等待 |
 | | `shot_error_log_every_seconds` | 30 | 连续截图异常的日志节流 |
 | | `room_check_seconds` | 5 | 直播间标题巡房间隔（只认房间，不点福袋） |
-| | `room_similarity` | 0.86 | 标题相似度≥该值视为同一房间，防 OCR 尾字抖动误切房 |
-| | `room_switch_settle_seconds` | 2 | 切房后等待再截图/关注 |
+| | `room_similarity` | 0.86 | 标题相似度≥该值视为同一房间，防 OCR 尾字抖动误判 |
 | | `room_missing_warn_seconds` | 180 | 连续多久没标题就警告 |
 | | `default_draw_seconds` | 750 | 读不到倒计时的默认排期 |
 | | `new_cycle_jump_seconds` | 90 | 倒计时回跳多少秒算新一轮 |
@@ -59,7 +58,7 @@ python -m venv .venv
 
 配置写错或未知键会在启动时打印 `[config]` 提示，并回落到内置默认值。
 
-巡房与福袋检测是分开的：每 `room_check_seconds`（默认 5 秒）截图 + OCR 标题，切房后立即重置并关注；点福袋仍按 `interval` 和 `[pacing]` 的节奏，不会因为巡房变快而频繁点开面板。
+巡房与福袋检测是分开的：每 `room_check_seconds`（默认 5 秒）截图 + OCR 标题，标题变化只写日志（`room_title_change`），**暂时不自动切房、不重置状态、不关注新主播**；点福袋仍按 `interval` 和 `[pacing]` 的节奏，不会因为巡房变快而频繁点开面板。
 
 ## 训练
 
@@ -116,7 +115,7 @@ adb devices                       # 确认设备已授权
 
 ## 工作机制
 
-1. 每轮截图，先 OCR 直播间标题：首见点一次主播「关注」；切房记 `直播间切换: A -> B`，重置轮次/开奖时间/关注状态继续蹲；连续 3 分钟无标题会警告并跳过福袋检查。
+1. 每轮截图，先 OCR 直播间标题：首见点一次主播「关注」；标题变化只记 `room_title_change: A -> B`，暂不自动切房、不重置轮次/开奖时间；连续超过阈值无标题会警告并跳过福袋检查。
 2. 面板已打开则直接处理任务；否则在左上角定位福袋浮标：优先用 `fudai_clf.npz`（HOG+颜色直方图线性分类器）滑窗打分，命中分 ≥0.12 即视为福袋；模型缺失/打分失败回退模板匹配、OCR 倒计时反推。
 3. 打开福袋面板后最多连点 3 步，每步都重新截图再判定：
    - 出现「一键发表评论」→ 点击完成福袋任务
@@ -143,7 +142,7 @@ requirements.txt     依赖
 config.toml          检测节奏/开奖观察/采样节流配置（CLI 可覆盖）
 log/                 运行日志与截图
 log/run_*.log        每次运行的文本日志
-log/fudai_log.csv    参与/切房/开奖结果记录
+log/fudai_log.csv    参与/标题变化/开奖结果记录
 log/shots/           关键节点截图（同时作为检测模型负样本来源）
 data/fudai/          福袋识别训练集（本机产物，不入库）
 data/fudai/icons/    图标样本 png（120x90，以福袋主体为中心）

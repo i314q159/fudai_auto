@@ -14,7 +14,6 @@ shot_retry_seconds = 10.0       # 截图异常后的重试等待
 shot_error_log_every_seconds = 30.0  # 连续截图异常时日志节流
 room_check_seconds = 5.0        # 直播间标题巡检间隔（只巡房，不点福袋）
 room_similarity = 0.86          # 标题相似度≥该值视为同一房间（防 OCR 尾字抖动）
-room_switch_settle_seconds = 2.0
 room_missing_warn_seconds = 180.0
 default_draw_seconds = 750.0    # 读不到倒计时时的默认排期（12.5 分钟）
 new_cycle_jump_seconds = 90.0   # 倒计时回跳多少秒算新一轮

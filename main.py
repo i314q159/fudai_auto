@@ -18,6 +18,16 @@ from difflib import SequenceMatcher
 import fudai_auto as fa
 
 
+def same_room(a, b, threshold=0.86):
+    """判断两次 OCR 标题是否同一房间：容忍前后缀抖动（如「文英菲克…7PR」）"""
+    if a == b:
+        return True
+    short, long = sorted((a, b), key=len)
+    if len(short) >= 4 and short in long:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= threshold
+
+
 def ensure_model(cold_start_below):
     """样本数低于阈值且没有可用检测模型时，用种子图自动冷启动"""
     n = len(glob.glob(os.path.join(fa.DATASET_ICONS, "*.png")))
@@ -136,27 +146,14 @@ def main():
                     if r == "followed":
                         img = fa.shot()
             elif name != cur_room:
-                # OCR 尾字/标点抖动（如「南山先生」→「南山先生m」）不算切房
-                ratio = SequenceMatcher(None, name, cur_room).ratio()
-                if ratio >= float(fa.cfg("detect", "room_similarity")):
+                # 暂时只检测标题变化，不自动切房：不重置轮次、不关注新主播
+                if same_room(name, cur_room, float(fa.cfg("detect", "room_similarity"))):
                     cur_room = max((cur_room, name), key=len)
                     fa.ROOM_NAME = cur_room
                 else:
-                    fa.log(f"直播间切换: {cur_room} -> {name}，状态已重置，开始在新直播间蹲福袋")
-                    fa.log_csv("room_switch", f"{cur_room} -> {name}")
+                    fa.log(f"直播间标题变化: {cur_room} -> {name}（仅记录，暂不自动切换）")
+                    fa.log_csv("room_title_change", f"{cur_room} -> {name}")
                     cur_room = name
-                    next_draw_ts = 0.0
-                    next_bag_ts = 0.0
-                    draw_watched = True
-                    last_rem = None
-                    last_rem_ts = 0.0
-                    cycle_count = 1
-                    fa.save(img, "room_switch")
-                    time.sleep(float(fa.cfg("detect", "room_switch_settle_seconds")))
-                    r = fa.follow_anchor(img)
-                    if r:
-                        fa.log_csv("follow", f"{name} {r}")
-                    continue
             if args.room and args.room not in name and not room_warned:
                 fa.log(
                     f"提示: 当前直播间为「{name}」，与 --room「{args.room}」不一致；已按当前直播间继续"
