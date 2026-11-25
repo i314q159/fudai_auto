@@ -206,7 +206,8 @@ def runtime_loop():
 
     # 每轮
     box(d, (900, 690, 1700, 860), "每轮：截图",
-        "adb exec-out screencap；异常 → 重连 adb / shell+pull 兜底\n连续异常按 [detect] 节流日志并延时重试", BLUE, BLUE_BG, fb, fbd)
+        "adb exec-out screencap；异常 → 重连 adb / shell+pull 兜底\n每 5s 巡房认标题；点福袋仍按 [run].interval",
+        BLUE, BLUE_BG, fb, fbd)
     arrow(d, (1300, 610), (1300, 690))
     label(d, (1324, 650), "开始巡检", fs, MUTED, "lm")
 

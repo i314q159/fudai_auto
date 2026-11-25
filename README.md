@@ -40,6 +40,7 @@ python -m venv .venv
 | `[cold_start]` | `below` | 30 | 样本数低于该值走种子图 bootstrap |
 | `[detect]` | `shot_retry_seconds` | 10 | 截图异常后的重试等待 |
 | | `shot_error_log_every_seconds` | 30 | 连续截图异常的日志节流 |
+| | `room_check_seconds` | 5 | 直播间标题巡房间隔（只认房间，不点福袋） |
 | | `room_switch_settle_seconds` | 2 | 切房后等待再截图/关注 |
 | | `room_missing_warn_seconds` | 180 | 连续多久没标题就警告 |
 | | `default_draw_seconds` | 750 | 读不到倒计时的默认排期 |
@@ -56,6 +57,8 @@ python -m venv .venv
 | | `log_every_seconds` | 20 | “等待开奖中”日志节流 |
 
 配置写错或未知键会在启动时打印 `[config]` 提示，并回落到内置默认值。
+
+巡房与福袋检测是分开的：每 `room_check_seconds`（默认 5 秒）截图 + OCR 标题，切房后立即重置并关注；点福袋仍按 `interval` 和 `[pacing]` 的节奏，不会因为巡房变快而频繁点开面板。
 
 ## 训练
 

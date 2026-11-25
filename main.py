@@ -79,6 +79,7 @@ def main():
     bag_count = 0
     cycle_no = 0
     next_draw_ts = 0.0
+    next_bag_ts = 0.0
     draw_watched = True
     cur_room = None
     room_warned = False
@@ -102,7 +103,8 @@ def main():
                 fa.log_csv("new_cycle", f"#{cycle_count} rem={rem}")
         last_rem, last_rem_ts = rem, now
 
-    fa.log(f"启动福袋蹲守 {args.minutes} 分钟，检查间隔 {args.interval}s")
+    room_check = float(fa.cfg("detect", "room_check_seconds"))
+    fa.log(f"启动福袋蹲守 {args.minutes} 分钟，检查间隔 {args.interval}s，巡房间隔 {room_check}s")
     fa.log_csv("start", f"minutes={args.minutes} interval={args.interval}")
 
     while time.time() < t_end:
@@ -137,6 +139,7 @@ def main():
                 fa.log_csv("room_switch", f"{cur_room} -> {name}")
                 cur_room = name
                 next_draw_ts = 0.0
+                next_bag_ts = 0.0
                 draw_watched = True
                 last_rem = None
                 last_rem_ts = 0.0
@@ -159,14 +162,21 @@ def main():
             last_room_seen = time.time()
             fa.save(img, "no_room_title")
 
-        # 有开奖弹窗先记录
-        rt = fa.texts_of(fa.ocr(fa.crop(img, fa.RESULT_ROI), 0.45))
-        if any(k in rt for k in ("恭喜", "很遗憾", "未中奖", "中奖")):
-            fa.save(img, "result_popup")
-            fa.log(f"识别到开奖文案: {rt[:60]}")
-            fa.log_csv("result", rt[:120])
+        now = time.time()
+        margin = float(fa.cfg("detect", "draw_margin_seconds"))
+        due_watch = (not draw_watched) and bool(next_draw_ts) and now >= next_draw_ts - margin
 
-        # 面板是否已打开
+        # 开奖弹窗先记录：只在整轮检测或临近开奖时扫，快速巡房不重复 OCR 整屏
+        if now >= next_bag_ts or due_watch:
+            rt = fa.texts_of(fa.ocr(fa.crop(img, fa.RESULT_ROI), 0.45))
+            if any(k in rt for k in ("恭喜", "很遗憾", "未中奖", "中奖")):
+                fa.save(img, "result_popup")
+                fa.log(f"识别到开奖文案: {rt[:60]}")
+                fa.log_csv("result", rt[:120])
+
+        bag_touched = False
+
+        # 面板是否已打开：打开着就优先处理，不受巡检节奏限制
         st, t = fa.panel_state(img)
         if st:
             status, rem, detail = fa.handle_panel(img)
@@ -188,52 +198,56 @@ def main():
                 fa.log_csv("need_payment", f"{cur_room} {detail}")
             track_cycle(rem)
             time.sleep(float(fa.cfg("detect", "panel_settle_seconds")))
+            bag_touched = True
         else:
-            # 打开福袋检查（未识别到直播间标题时跳过，避免在搜索页/桌面误点）
+            # 未识别到直播间标题时跳过福袋检查，避免在搜索页/桌面误点
             if not fa.ROOM_NAME:
                 fa.log("未识别到直播间标题，本轮跳过福袋检查")
-                time.sleep(args.interval)
+                time.sleep(room_check)
                 continue
-            img2, info = fa.open_bag_panel(img)
-            if img2 is None:
-                fa.log(f"未见福袋图标: {info}")
-            else:
-                st2, _ = fa.panel_state(img2)
-                if not st2:
-                    fa.log(f"打开福袋后面板未识别，关闭 ({info})")
-                    fa.close_panel()
+
+            # 只有到整轮检测时间才点福袋；其余巡检只抓标题，快速发现切房
+            if now >= next_bag_ts:
+                bag_touched = True
+                img2, info = fa.open_bag_panel(img)
+                if img2 is None:
+                    fa.log(f"未见福袋图标: {info}")
                 else:
-                    status, rem, detail = fa.handle_panel(img2)
-                    if status == "joined_now":
-                        bag_count += 1
-                        fa.log(f"第 {bag_count} 次参与成功({detail})")
-                        fa.log_csv("join", f"{cur_room} #{bag_count} {detail} remaining={rem}")
-                        if rem is not None:
+                    st2, _ = fa.panel_state(img2)
+                    if not st2:
+                        fa.log(f"打开福袋后面板未识别，关闭 ({info})")
+                        fa.close_panel()
+                    else:
+                        status, rem, detail = fa.handle_panel(img2)
+                        if status == "joined_now":
+                            bag_count += 1
+                            fa.log(f"第 {bag_count} 次参与成功({detail})")
+                            fa.log_csv("join", f"{cur_room} #{bag_count} {detail} remaining={rem}")
+                            if rem is not None:
+                                next_draw_ts = time.time() + rem
+                                draw_watched = False
+                        elif rem is not None:
                             next_draw_ts = time.time() + rem
                             draw_watched = False
-                    elif rem is not None:
-                        next_draw_ts = time.time() + rem
-                        draw_watched = False
-                        fa.log(f"当前福袋已参与，剩余 {rem}s 开奖")
-                    else:
-                        next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
-                        draw_watched = False
-                        mins = float(fa.cfg("detect", "default_draw_seconds")) / 60
-                    fa.log(f"未读到倒计时，按默认 {mins:g} 分钟排开奖")
-                    if status == "need_payment":
-                        fa.log("该福袋需要付费（抖币），已暂停自动点击，请手动处理")
-                        fa.log_csv("need_payment", f"{cur_room} {detail}")
-                    track_cycle(rem)
+                            fa.log(f"当前福袋已参与，剩余 {rem}s 开奖")
+                        else:
+                            next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
+                            draw_watched = False
+                            mins = float(fa.cfg("detect", "default_draw_seconds")) / 60
+                            fa.log(f"未读到倒计时，按默认 {mins:g} 分钟排开奖")
+                        if status == "need_payment":
+                            fa.log("该福袋需要付费（抖币），已暂停自动点击，请手动处理")
+                            fa.log_csv("need_payment", f"{cur_room} {detail}")
+                        track_cycle(rem)
 
-        # 开奖窗口
-        if (not draw_watched) and next_draw_ts and time.time() >= next_draw_ts - float(
-            fa.cfg("detect", "draw_margin_seconds")
-        ):
+        # 开奖窗口（可能正好落在两次整轮检测之间）
+        if due_watch:
             fa.log(f"进入开奖观察窗口（第 {cycle_count} 轮）")
             fa.watch_result(float(fa.cfg("detect", "watch_seconds")))
             draw_watched = True
+            bag_touched = True
 
-        # 睡眠：按剩余时间自适应，临近开奖打短，避免错过开奖瞬间
+        # 下一轮福袋检测按剩余时间自适应；巡房仍按 room_check 的短节奏
         gap = args.interval
         if (not draw_watched) and last_rem is not None:
             if last_rem > float(fa.cfg("pacing", "slow_remaining_seconds")):
@@ -242,12 +256,16 @@ def main():
                 gap = float(fa.cfg("pacing", "mid_interval"))
             else:
                 gap = max(float(fa.cfg("pacing", "near_min_seconds")), args.interval)
-        sleep_s = gap
+        if bag_touched:
+            next_bag_ts = time.time() + gap
+
+        # 睡到最近的事件：下一次整轮检测 / 开奖窗口 / 下一次巡房
+        sleep_s = room_check
+        if next_bag_ts:
+            sleep_s = min(sleep_s, max(0.0, next_bag_ts - time.time()))
         if (not draw_watched) and next_draw_ts:
-            sleep_s = max(
-                float(fa.cfg("pacing", "min_sleep_seconds")),
-                min(sleep_s, next_draw_ts - time.time() - float(fa.cfg("detect", "draw_margin_seconds"))),
-            )
+            sleep_s = min(sleep_s, next_draw_ts - time.time() - margin)
+        sleep_s = max(float(fa.cfg("pacing", "min_sleep_seconds")), sleep_s)
         time.sleep(sleep_s)
 
     fa.log(f"结束，共参与 {bag_count} 次福袋")
