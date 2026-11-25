@@ -15,6 +15,3 @@ def get_adb_device_serial_via_subprocess():
     except subprocess.CalledProcessError as e:
         print(f"Error running adb: {e}")
     return None
-
-
-device_id = get_adb_device_serial_via_subprocess()
