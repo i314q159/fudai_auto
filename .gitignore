@@ -3,4 +3,9 @@ log/
 __pycache__/
 *.pyc
 _auto_shot.png
-data/
+
+# 训练数据整体不入库，但保留福袋模板图
+data/*
+!data/fudai/
+data/fudai/*
+!data/fudai/bag_template.png
