@@ -3,7 +3,7 @@
 # 时间单位统一为秒（run.minutes 为分钟）
 
 [run]
-minutes = 180.0
+minutes = 60.0
 interval = 60.0                 # 基础巡检间隔
 
 [cold_start]
