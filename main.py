@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from difflib import SequenceMatcher
 
 import fudai_auto as fa
 
@@ -135,21 +136,27 @@ def main():
                     if r == "followed":
                         img = fa.shot()
             elif name != cur_room:
-                fa.log(f"直播间切换: {cur_room} -> {name}，状态已重置，开始在新直播间蹲福袋")
-                fa.log_csv("room_switch", f"{cur_room} -> {name}")
-                cur_room = name
-                next_draw_ts = 0.0
-                next_bag_ts = 0.0
-                draw_watched = True
-                last_rem = None
-                last_rem_ts = 0.0
-                cycle_count = 1
-                fa.save(img, "room_switch")
-                time.sleep(float(fa.cfg("detect", "room_switch_settle_seconds")))
-                r = fa.follow_anchor(img)
-                if r:
-                    fa.log_csv("follow", f"{name} {r}")
-                continue
+                # OCR 尾字/标点抖动（如「南山先生」→「南山先生m」）不算切房
+                ratio = SequenceMatcher(None, name, cur_room).ratio()
+                if ratio >= float(fa.cfg("detect", "room_similarity")):
+                    cur_room = max((cur_room, name), key=len)
+                    fa.ROOM_NAME = cur_room
+                else:
+                    fa.log(f"直播间切换: {cur_room} -> {name}，状态已重置，开始在新直播间蹲福袋")
+                    fa.log_csv("room_switch", f"{cur_room} -> {name}")
+                    cur_room = name
+                    next_draw_ts = 0.0
+                    next_bag_ts = 0.0
+                    draw_watched = True
+                    last_rem = None
+                    last_rem_ts = 0.0
+                    cycle_count = 1
+                    fa.save(img, "room_switch")
+                    time.sleep(float(fa.cfg("detect", "room_switch_settle_seconds")))
+                    r = fa.follow_anchor(img)
+                    if r:
+                        fa.log_csv("follow", f"{name} {r}")
+                    continue
             if args.room and args.room not in name and not room_warned:
                 fa.log(
                     f"提示: 当前直播间为「{name}」，与 --room「{args.room}」不一致；已按当前直播间继续"

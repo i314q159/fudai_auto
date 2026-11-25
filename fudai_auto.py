@@ -41,6 +41,7 @@ DEFAULT_CONFIG = {
         "shot_retry_seconds": 10.0,
         "shot_error_log_every_seconds": 30.0,
         "room_check_seconds": 5.0,
+        "room_similarity": 0.86,
         "room_switch_settle_seconds": 2.0,
         "room_missing_warn_seconds": 180.0,
         "default_draw_seconds": 750.0,
@@ -348,11 +349,15 @@ def find_bag(img):
             cx = ICON_ROI[0] + loc[0] + shape[1] // 2
             cy = ICON_ROI[1] + loc[1] + int(shape[0] * 0.6)
             return cx, cy, f"tpl:{best[0]:.2f}"
-    for i in ocr(roi, 0.45):
-        if TIME_RE.search(i["text"]):
-            cx = ICON_ROI[0] + i["x"] + i["w"] / 2
-            cy = ICON_ROI[1] + i["y"] - 25
-            return cx, cy, f"ocr:{i['text']}"
+    cands = [i for i in ocr(roi, 0.45) if TIME_RE.search(i["text"])]
+    # 福袋倒计时贴在最左侧图标下方；过滤掉榜单/商品卡里的其它倒计时
+    cands.sort(key=lambda i: (i["x"], i["y"]))
+    for i in cands:
+        if i["x"] >= 220:
+            continue
+        cx = ICON_ROI[0] + i["x"] + i["w"] / 2
+        cy = ICON_ROI[1] + i["y"] - 25
+        return cx, cy, f"ocr:{i['text']}"
     return None
 
 
@@ -525,7 +530,8 @@ def handle_panel(img):
         wide_roi = (0, 1300, 1080, 2400)
         wide_items = ocr(crop(img, wide_roi), 0.3)
         hit = None
-        for kw in ("立即加入", "确认加入", "加入粉丝团", "确认关注", "立即关注"):
+        for kw in ("加入购物粉丝团并关注主播", "加入购物粉丝团", "加入粉丝团",
+                   "粉丝团并关注", "立即加入", "确认加入", "确认关注", "立即关注"):
             hit = next((i for i in wide_items if kw in i["text"]), None)
             if hit:
                 break

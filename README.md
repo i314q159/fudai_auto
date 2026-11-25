@@ -41,6 +41,7 @@ python -m venv .venv
 | `[detect]` | `shot_retry_seconds` | 10 | 截图异常后的重试等待 |
 | | `shot_error_log_every_seconds` | 30 | 连续截图异常的日志节流 |
 | | `room_check_seconds` | 5 | 直播间标题巡房间隔（只认房间，不点福袋） |
+| | `room_similarity` | 0.86 | 标题相似度≥该值视为同一房间，防 OCR 尾字抖动误切房 |
 | | `room_switch_settle_seconds` | 2 | 切房后等待再截图/关注 |
 | | `room_missing_warn_seconds` | 180 | 连续多久没标题就警告 |
 | | `default_draw_seconds` | 750 | 读不到倒计时的默认排期 |
