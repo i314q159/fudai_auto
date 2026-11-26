@@ -10,7 +10,7 @@ from .paths import ROOT
 
 DEFAULT_CONFIG = {
     "run": {"minutes": 180.0, "interval": 60.0},
-    "room": {"max_rounds": 5, "switch_after_last_draw": True, "swipe_attempts": 3},
+    "room": {"min_rounds": 3, "max_rounds": 9, "switch_after_last_draw": True, "swipe_attempts": 3},
     "cold_start": {"below": 30},
     "detect": {
         "shot_retry_seconds": 10.0,

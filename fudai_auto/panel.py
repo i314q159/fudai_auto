@@ -100,7 +100,7 @@ def close_panel():
 
 
 def handle_panel(img):
-    """处理福袋面板：返回 (status, remaining, detail)。
+    """处理福袋面板：返回 (status, remaining, detail, commented)。
 
     status:
       joined_now   本次有真实点击（完成任务/加入粉丝团）
@@ -108,9 +108,12 @@ def handle_panel(img):
       need_payment 触发了付费确认，已停手
       unknown      面板已关闭但没识别到有效状态
     detail 用于日志/CSV，记录点过的按钮文字。
+    commented 表示本次是否点到「一键发表评论」——主循环只按它计轮，
+    只加粉丝团、只点兜底确认按钮都不算真正参与。
     """
     rem = read_remaining(img)
     clicked = []
+    commented = False
     steps = 0
     panel_px = sc_roi(PANEL_ROI)
     pay_px = sc_roi(PAY_ROI)
@@ -129,6 +132,8 @@ def handle_panel(img):
             cx = panel_px[0] + x + w // 2
             cy = panel_px[1] + y + h // 2
             log(f"面板按钮「{t[:24]}」-> 点击 ({cx},{cy})")
+            if "一键发表评论" in t:
+                commented = True
             tap(cx, cy)
             time.sleep(1.5)
             img = shot()
@@ -138,7 +143,7 @@ def handle_panel(img):
                 save(img, "need_payment")
                 tap(*sc_pt(540, 700))
                 time.sleep(0.6)
-                return "need_payment", rem, "payment"
+                return "need_payment", rem, "payment", commented
             steps += 1
             clicked.append(t[:20])
             continue
@@ -147,7 +152,10 @@ def handle_panel(img):
         if any(k in t for k in WAIT_KEYS):
             log(f"该福袋已参与，等待开奖（剩余 {rem if rem is not None else '未知'}s）")
             close_panel()
-            return ("joined_now" if clicked else "already"), rem, ";".join(clicked) or "wait"
+            return (
+                ("joined_now" if clicked else "already"), rem,
+                ";".join(clicked) or "wait", commented,
+            )
 
         # 情况 3：兜底——确认类弹层，文字按钮不在底部粉色条位置
         wide_roi = sc_roi(PANEL_FALLBACK_ROI)
@@ -168,18 +176,21 @@ def handle_panel(img):
             if any(k in pay for k in PAY_KEYS):
                 log("确认层触发付费，已暂停")
                 tap(*sc_pt(540, 700))
-                return "need_payment", rem, "payment"
+                return "need_payment", rem, "payment", commented
             steps += 1
             clicked.append(hit["text"][:16])
             continue
 
         # 情况 4：面板已经消失
         log(f"面板已关闭，任务处理结束: {t[:40]}")
-        return ("joined_now" if clicked else "unknown"), rem, ";".join(clicked) or t[:40]
+        return (
+            ("joined_now" if clicked else "unknown"), rem,
+            ";".join(clicked) or t[:40], commented,
+        )
 
     log("面板任务步骤已达上限，停止继续点击")
     close_panel()
-    return ("joined_now" if clicked else "unknown"), rem, ";".join(clicked)
+    return ("joined_now" if clicked else "unknown"), rem, ";".join(clicked), commented
 
 
 def open_bag_panel(img):

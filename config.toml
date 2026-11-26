@@ -4,11 +4,12 @@
 
 [run]
 minutes = 1440.0
-interval = 60.0                 # 福袋面板检查间隔（固定 1 分钟一次）
+interval = 60.0                 # 已跟到福袋、等开奖时的检查间隔
 
 [room]
-max_rounds = 5                  # 每个直播间蹲满几轮福袋后上滑切下一间（0 = 不切）
-switch_after_last_draw = true   # true: 等第 5 轮开奖结果出来再切；false: 第 5 轮点完立刻切
+min_rounds = 3                  # 进入直播间时在 min~max 之间随机决定蹲几轮（含端点）
+max_rounds = 9                  # 蹲守轮数上限；0 = 不切房
+switch_after_last_draw = true   # true: 等最后一轮开奖结果出来再切；false: 最后一轮点完立刻切
 swipe_attempts = 3              # 上滑切房失败重试次数
 
 [cold_start]
@@ -22,7 +23,7 @@ scan_interval_seconds = 20.0    # 本房间还没跟到福袋时的巡检间隔�
 room_similarity = 0.86          # 标题相似度≥该值视为同一房间（防 OCR 尾字抖动）
 room_missing_warn_seconds = 180.0
 default_draw_seconds = 300.0    # 读不到倒计时时的默认排期（5 分钟）
-new_cycle_jump_seconds = 90.0   # 同一福袋重复点击时，回跳超过该值才算新一轮（仅真实点击后判定）
+new_cycle_jump_seconds = 90.0   # 判是否同一个福袋：倒计时回跳超过该值、或上一袋已开奖才算新袋（只按「一键发表评论」计轮）
 watch_seconds = 90.0            # 开奖观察窗口时长
 draw_margin_seconds = 3.0       # 提前多少秒进入观察窗口
 panel_settle_seconds = 1.0      # 面板处理完到下一轮的间隔
