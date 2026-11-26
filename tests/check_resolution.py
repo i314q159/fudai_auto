@@ -2,14 +2,21 @@
 """离线校验分辨率自适应：把同一张 1080×2400 截图缩放到其它尺寸，
 检查福袋定位 / 房间名 / 倒计时 / 开奖弹层识别是否仍然成立。
 
-用法: python check_resolution.py [截图路径]
+放在 tests/ 下，不参与运行时，也不影响 main.py / 训练脚本；
+脚本自己把仓库根目录加进 sys.path，任意工作目录都能直接跑。
+
+用法: python tests/check_resolution.py [截图路径]
 默认用 log/shots 下最新的两张全屏截图。
 """
+import glob
 import os
 import sys
-import glob
 
 import cv2
+
+# 允许从任意目录运行：先找到仓库根（本文件在 tests/ 下一层）
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 
 import fudai_auto as fa
 

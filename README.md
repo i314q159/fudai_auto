@@ -99,7 +99,7 @@ adb devices                       # 确认设备已授权
 
 - **只要流程能跑**：直接启动 `main.py`。检测模型缺失且样本 <30 时，会自动找 `data/fudai/seed/` 下的种子图做 bootstrap；没有种子图会在日志里明确报错。
 - **要接着原来的数据练**：把旧机器的整个 `data/fudai/` 拷过来（icons、labels.csv、seed、model 一起），再按需跑 `.\train.ps1`。
-- 手机换了：`--serial` 或环境变量 `FUDAI_SERIAL` 覆盖；ROI 与点击坐标统一按 1080×2400 设计，运行时按实际截图宽高自动等比缩放（`SCALE` + `sc_roi()`/`sc_pt()`），换分辨率不用改代码。可用 `python check_resolution.py <截图>` 离线验证多种尺寸下的福袋定位、标题、倒计时与开奖文案识别。
+- 手机换了：`--serial` 或环境变量 `FUDAI_SERIAL` 覆盖；ROI 与点击坐标统一按 1080×2400 设计，运行时按实际截图宽高自动等比缩放（`SCALE` + `sc_roi()`/`sc_pt()`），换分辨率不用改代码。可用 `python tests\check_resolution.py <截图>` 离线验证多种尺寸下的福袋定位、标题、倒计时与开奖文案识别。
 
 ## 流程图
 
@@ -179,6 +179,7 @@ data/fudai/model/    检测/状态模型与训练报告（不入库）
 docs/make_flowchart.py            流程图生成脚本（PIL）
 docs/pipeline.png                 采集 / 训练 / 装配图
 docs/runtime_loop.png             运行时入口与循环图
+tests/check_resolution.py         离线分辨率自检（缩放假截图跑检测链路，不连手机）
 .venv/               虚拟环境
 ```
 
