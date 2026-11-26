@@ -105,19 +105,27 @@ def _tap_wait():
     return float(cfg("detect", "tap_wait_seconds"))
 
 
+# 至少看几次截图/OCR 才允许按时间放弃：慢机型一张图+一次识别要好几秒，
+# 只看时间会把「还在识别」直接判成「没打开」
+MIN_PANEL_CHECKS = 2
+
+
 def wait_panel_open(deadline=None):
     """点完福袋图标后等面板出现。
 
-    出现就立刻返回 (截图, True)；等满 deadline 还没出现返回 (最后一张截图, False)。
-    先等 0.5s 再截第一张：慢机型上「点完立刻截图」抓到的可能还是点击前的画面。
+    先固定等 panel_open_settle_seconds（默认 3s）让面板渲染完，再截第一张识别图；
+    之后每 0.15s 复查一次，出现就立刻返回 (截图, True)。
+    至少看 MIN_PANEL_CHECKS 次且超过 deadline 还没出现，才返回 (最后一张截图, False)。
     """
-    time.sleep(0.5)
+    time.sleep(float(cfg("detect", "panel_open_settle_seconds")))
     end = time.time() + (_tap_wait() if deadline is None else deadline)
+    checks = 0
     while True:
         img = shot()
+        checks += 1
         if panel_state(img)[0]:
             return img, True
-        if time.time() >= end:
+        if checks >= MIN_PANEL_CHECKS and time.time() >= end:
             return img, False
         time.sleep(0.15)
 
@@ -125,16 +133,19 @@ def wait_panel_open(deadline=None):
 def wait_panel_change(panel_px, before, deadline=None):
     """点完面板按钮后等底部文字变化（面板内容变了/面板消失都算）。
 
-    返回 (截图, 新文字)。文字一直不变时最多等 deadline 秒，和原来的固定等待等价。
+    返回 (截图, 新文字)。文字一直不变时，至少看 MIN_PANEL_CHECKS 次且超过
+    deadline 才放弃，和原来的固定等待等价。
     """
     time.sleep(0.4)
     end = time.time() + (_tap_wait() if deadline is None else deadline)
+    checks = 0
     while True:
         img = shot()
+        checks += 1
         t = texts_of(ocr(crop(img, panel_px), 0.45))
         if t != before:
             return img, t
-        if time.time() >= end:
+        if checks >= MIN_PANEL_CHECKS and time.time() >= end:
             return img, t
         time.sleep(0.15)
 

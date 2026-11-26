@@ -27,7 +27,8 @@ new_cycle_jump_seconds = 90.0   # 判是否同一个福袋：倒计时回跳超�
 watch_seconds = 90.0            # 开奖观察窗口时长
 result_auto_close_seconds = 12.0  # 中奖/未中奖卡点不掉时，等它自动关闭的最长时间
 draw_margin_seconds = 3.0       # 提前多少秒进入观察窗口
-tap_wait_seconds = 3.0          # 点击后等界面反应的最长时间（界面一变就继续；面板渲染慢的机型别调太小）
+tap_wait_seconds = 6.0          # 点击后等界面反应的最长时间（界面一变就继续；至少看 2 次识别）
+panel_open_settle_seconds = 3.0  # 点开福袋后先等面板渲染再截第一张识别图
 panel_settle_seconds = 0.5      # 面板处理完到下一轮的间隔
 
 [pacing]
