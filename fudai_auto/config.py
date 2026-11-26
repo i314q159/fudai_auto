@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
         "default_draw_seconds": 750.0,
         "new_cycle_jump_seconds": 90.0,
         "watch_seconds": 90.0,
+        "result_auto_close_seconds": 12.0,
         "draw_margin_seconds": 3.0,
         "tap_wait_seconds": 3.0,
         "panel_settle_seconds": 0.5,

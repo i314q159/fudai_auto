@@ -2,13 +2,14 @@
 """开奖结果弹层：识别、统一关闭、开奖窗口观察。
 
 中奖卡与未中奖卡共用一套关闭逻辑：
-  文字按钮（我知道了/确定/开心收下…） -> OCR 找卡片右上角 × -> 固定关闭位 -> 返回键兜底
+  文字按钮（我知道了/确定/开心收下…） -> OCR 找 × -> 固定关闭位（约 (540,1704)）
+  -> 都点不掉就等它自己消失（两种卡都会定时自动关闭，**不按返回键**，避免退出直播间）
 故意不点「填写地址 / 领取奖品」，避免跳到领奖页离开直播间。
 """
 import time
 
 from .config import cfg
-from .device import adb, shot, tap
+from .device import shot, tap
 from .layout import (
     RESULT_BTN_TEXTS, RESULT_KEYS, RESULT_ROI, WIN_CLOSE_POINTS,
     crop, sc_pt, sc_roi, sx, sy,
@@ -25,14 +26,14 @@ def result_present(text):
 def dismiss_result(img, text=None):
     """关闭中奖 / 未中奖弹层，返回 (关闭后的截图, 是否已关闭)。
 
-    最多走 len(WIN_CLOSE_POINTS)+1 轮：每轮先找文字按钮，再找 × 图标，
-    都没有就依次点固定关闭位；最后一轮按一次返回键（只按一次，防止退出直播间）。
+    最多走 len(WIN_CLOSE_POINTS) 轮：每轮先找文字按钮，再找 × 图标，
+    都没有就依次点固定关闭位；还关不掉就等它自动关闭（不按返回键）。
     """
     roi_px = sc_roi(RESULT_ROI)
     if text is None:
         text = texts_of(ocr(crop(img, roi_px), 0.45))
 
-    for step in range(len(WIN_CLOSE_POINTS) + 1):
+    for step in range(len(WIN_CLOSE_POINTS)):
         if not result_present(text):
             return img, True
 
@@ -62,23 +63,41 @@ def dismiss_result(img, text=None):
                 roi_px[1] + hit["y"] + hit["h"] / 2,
             )
             log(f"开奖弹层点击「{hit['text'][:10]}」")
-        elif step < len(WIN_CLOSE_POINTS):
+            # 文字按钮（未中奖卡的「我知道了」）点下去卡片关得快，少等一会儿
+            settle = 0.7
+        else:
             # 3) 固定关闭位（中奖卡的圆形 × 是图形，OCR 常常读不出文字）
             x, y = sc_pt(*WIN_CLOSE_POINTS[step])
             tap(x, y)
             log(f"开奖弹层点击关闭位 ({x},{y})")
-        else:
-            # 4) 最后兜底：按一次返回键（只按一次，防止退出直播间）
-            log("开奖弹层仍关不掉，按一次返回键")
-            adb("shell", "input", "keyevent", "4")
+            settle = 1.2
 
-        time.sleep(1.2)
+        time.sleep(settle)
         img = shot()
         text = texts_of(ocr(crop(img, roi_px), 0.4))
 
-    closed = not result_present(text)
-    log("开奖弹层已关闭，回到福袋检测" if closed else "开奖弹层未关闭，下一轮继续尝试")
-    return img, closed
+    if not result_present(text):
+        return img, True
+
+    # 4) 点不掉就等它自动关闭：中奖卡/未中奖卡都会自己消失，
+    #    按返回键可能直接退出直播间，所以不再兜底返回键
+    return _wait_auto_close(img, roi_px)
+
+
+def _wait_auto_close(img, roi_px):
+    """轮询等开奖弹层自己消失，返回 (最后一张截图, 是否已关闭)。"""
+    wait_s = float(cfg("detect", "result_auto_close_seconds"))
+    end = time.time() + wait_s
+    log(f"开奖弹层没点掉，等它自动关闭（最多 {wait_s:g}s）")
+    while True:
+        if time.time() >= end:
+            log("开奖弹层仍未自动关闭，留到下一轮")
+            return img, False
+        time.sleep(1.5)
+        img = shot()
+        if not result_present(texts_of(ocr(crop(img, roi_px), 0.4))):
+            log("开奖弹层已自动关闭，回到福袋检测")
+            return img, True
 
 
 def watch_result(seconds=None):
