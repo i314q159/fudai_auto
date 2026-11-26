@@ -105,7 +105,11 @@ def negatives(rng, per_frame=140):
     再把窗口统一 resize 回 120×90，和正样本口径保持一致。
     """
     out = []
-    frames = sorted(glob.glob(os.path.join(SHOT_DIR, "*.png")))
+    # 漏检诊断帧（*_no_icon.png）可能真的含福袋，不能当负样本喂进训练集
+    frames = [
+        f for f in sorted(glob.glob(os.path.join(SHOT_DIR, "*.png")))
+        if "_no_icon" not in os.path.basename(f)
+    ]
     for f in frames:
         img = cv2.imread(f)
         if img is None or img.shape[0] < 1000:

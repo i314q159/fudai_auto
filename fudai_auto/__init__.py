@@ -27,7 +27,8 @@ from . import state
 from .config import CONFIG, DEFAULT_CONFIG, cfg
 from .dataset import save_dataset
 from .detector import (
-    BAG_TPL, BAG_TPL_PATH, CLF_PATH, clf_locate, find_bag, load_clf, pink_blob,
+    BAG_TPL, BAG_TPL_PATH, CLF_PATH, clf_best, clf_locate, find_bag, load_clf,
+    pink_blob,
     reload_clf,
 )
 from .device import adb, device_state, ensure_device, shot, swipe_next_room, tap
@@ -62,7 +63,7 @@ _EXTRA_EXPORTS = [
     "DEFAULT_CONFIG", "cfg", "log", "log_csv", "save", "adb", "device_state",
     "ensure_device", "shot", "tap", "swipe_next_room", "engine", "ocr",
     "texts_of", "TIME_RE", "parse_countdown", "BAG_TPL", "BAG_TPL_PATH",
-    "CLF_PATH", "clf_locate", "find_bag", "load_clf", "reload_clf",
+    "CLF_PATH", "clf_best", "clf_locate", "find_bag", "load_clf", "reload_clf",
     "pink_blob", "save_dataset", "get_room_name", "follow_anchor",
     "pink_button_box", "read_remaining", "panel_state", "close_panel",
     "handle_panel", "open_bag_panel", "result_present", "dismiss_result",

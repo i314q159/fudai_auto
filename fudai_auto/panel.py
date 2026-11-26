@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 from .dataset import save_dataset
-from .detector import find_bag
+from .detector import clf_best, find_bag
 from .device import shot, tap
 from .layout import (
     ICON_ROI, PANEL_FALLBACK_ROI, PANEL_HEAD_ROI, PANEL_HEAD_ROI_WIDE,
@@ -40,6 +40,9 @@ CONFIRM_KEYS = (
 )
 # 付费确认关键词：命中即暂停自动点击
 PAY_KEYS = ("抖币", "确认支付", "立即支付", "去支付")
+
+# 漏检诊断图的落盘节流（秒）：no-icon 时最多每 5 分钟存一张到 log/shots
+_last_noicon_shot = 0.0
 
 
 def pink_button_box(roi_img):
@@ -187,7 +190,21 @@ def open_bag_panel(img):
     """
     pos = find_bag(img)
     if not pos:
-        return None, "no-icon"
+        # 诊断：记录分类器最高分 + 图标区 OCR，下次漏检能直接定位原因
+        best = clf_best(img)
+        if not best:
+            return None, "no-icon"
+        score = best[2]
+        txt = texts_of(ocr(crop(img, sc_roi(ICON_ROI)), 0.45)).strip()
+        global _last_noicon_shot
+        now = time.time()
+        if now - _last_noicon_shot >= 300:
+            _last_noicon_shot = now
+            save(img, "no_icon")
+        detail = f"no-icon clf_max={score:+.2f}"
+        if txt:
+            detail += f" icon_text={txt[:24]}"
+        return None, detail
 
     cx, cy, src = pos
     tap(cx, cy)

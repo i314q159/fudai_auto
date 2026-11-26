@@ -81,6 +81,19 @@ def reload_clf():
 load_clf()
 
 
+def _clf_window():
+    """当前屏幕下的分类器窗口与步长（设计像素按 SCALE 换算）。"""
+    return (
+        {
+            "w": state.CLF["w"],
+            "thresh": state.CLF["thresh"],
+            "win_w": max(8, int(round(state.CLF["win_w"] * SCALE["x"]))),
+            "win_h": max(8, int(round(state.CLF["win_h"] * SCALE["y"]))),
+        },
+        max(4, int(round(8 * SCALE["x"]))),
+    )
+
+
 def clf_locate(img):
     """用分类模型在福袋区滑窗打分，返回 (cx, cy, 'clf:分数') 或 None。
 
@@ -88,20 +101,26 @@ def clf_locate(img):
     """
     if state.CLF is None:
         return None
-    win = {
-        "w": state.CLF["w"],
-        "thresh": state.CLF["thresh"],
-        "win_w": max(8, int(round(state.CLF["win_w"] * SCALE["x"]))),
-        "win_h": max(8, int(round(state.CLF["win_h"] * SCALE["y"]))),
-    }
+    win, stride = _clf_window()
     hit = fudai_feat.locate(
-        img, sc_roi(ICON_ROI), win, state.CLF["thresh"],
-        stride=max(4, int(round(8 * SCALE["x"]))),
+        img, sc_roi(ICON_ROI), win, state.CLF["thresh"], stride=stride,
     )
     if not hit:
         return None
     cx, cy, s = hit
     return cx, cy, f"clf:{s:.2f}"
+
+
+def clf_best(img):
+    """诊断用：不分阈值，返回福袋区里分数最高的窗口 (cx, cy, score)。
+
+    没有模型或区域太小时返回 None。只在检测失败时调用，用来在日志里区分
+    「屏上没有福袋（分数极低）」和「有福袋但卡在阈值边缘」。
+    """
+    if state.CLF is None:
+        return None
+    win, stride = _clf_window()
+    return fudai_feat.locate(img, sc_roi(ICON_ROI), win, -9.9, stride=stride)
 
 
 def find_bag(img):
