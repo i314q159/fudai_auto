@@ -275,9 +275,6 @@ def main():
         leave_after_draw = True
         fa.log(f"直播间「{cur_room}」已蹲满 {cycle_count} 轮（本次目标 {room_rounds}），准备切下一间")
         fa.log_csv("room_rounds_full", f"{cur_room} rounds={cycle_count} goal={room_rounds}")
-        # 等开奖时如果没读到倒计时，按默认时长排期，避免永远等不到观察窗口
-        if switch_after_draw and (not next_draw_ts or next_draw_ts <= time.time()):
-            next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
 
     def switch_room():
         """上滑切下一个直播间；成功后轮次与开奖状态清零"""
@@ -413,7 +410,7 @@ def main():
         # 面板是否已打开：打开着就优先处理，不受巡检节奏限制
         st, t = fa.panel_state(img)
         if st:
-            status, rem, detail, commented = fa.handle_panel(img)
+            status, rem, detail, commented = fa.handle_panel(img, panel_text=t)
             if status == "joined_now":
                 if not commented:
                     fa.log(f"本次只点了「{detail}」，没点到「一键发表评论」，不计轮次")
@@ -430,8 +427,9 @@ def main():
                 next_draw_ts = time.time() + rem
                 draw_watched = False
             else:
-                next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
-                draw_watched = False
+                # 读不到倒计时就不排期：不编造开奖时间，靠每轮巡检抓开奖弹层
+                draw_watched = True
+                fa.log("未读到倒计时，不排开奖时间")
             if status == "need_payment":
                 fa.log("该福袋需要付费（抖币），本房间不再自动点击，请手动处理")
                 fa.log_csv("need_payment", f"{cur_room} {detail}")
@@ -451,12 +449,12 @@ def main():
                 if img2 is None:
                     fa.log(f"未见福袋图标: {info}")
                 else:
-                    st2, _ = fa.panel_state(img2)
+                    st2, t2 = fa.panel_state(img2)
                     if not st2:
                         fa.log(f"打开福袋后面板未识别，关闭 ({info})")
                         fa.close_panel()
                     else:
-                        status, rem, detail, commented = fa.handle_panel(img2)
+                        status, rem, detail, commented = fa.handle_panel(img2, panel_text=t2)
                         if status == "joined_now":
                             if not commented:
                                 fa.log(f"本次只点了「{detail}」，没点到「一键发表评论」，不计轮次")
@@ -474,16 +472,16 @@ def main():
                             draw_watched = False
                             fa.log(f"当前福袋已参与，剩余 {rem}s 开奖")
                         else:
-                            next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
-                            draw_watched = False
-                            mins = float(fa.cfg("detect", "default_draw_seconds")) / 60
-                            fa.log(f"未读到倒计时，按默认 {mins:g} 分钟排开奖")
+                            draw_watched = True
+                            fa.log("未读到倒计时，不排开奖时间")
                         if status == "need_payment":
                             fa.log("该福袋需要付费（抖币），已暂停自动点击，请手动处理")
                             fa.log_csv("need_payment", f"{cur_room} {detail}")
 
-        # 配置为“点完第 5 轮立即切房”时，不等开奖直接上滑
-        if leave_after_draw and not switch_after_draw:
+        # 配置为“点完最后一轮立即切房”，或已经没有可等的开奖时间时，不等开奖直接上滑
+        if leave_after_draw and not (
+            switch_after_draw and not draw_watched and next_draw_ts > time.time()
+        ):
             switch_room()
             continue
 
