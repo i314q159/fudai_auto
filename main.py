@@ -521,4 +521,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Ctrl+C 是正常停止方式，不甩 traceback；记一行便于复盘
+        fa.log("收到 Ctrl+C，已停止")
+        fa.log_csv("end", "interrupted")
