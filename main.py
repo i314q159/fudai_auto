@@ -229,6 +229,21 @@ def main():
     switch_after_draw = bool(fa.cfg("room", "switch_after_last_draw"))
     swipe_attempts = int(fa.cfg("room", "swipe_attempts"))
 
+    followed_room = None     # 已经点过关注的直播间：没检测到福袋的房间不点关注
+
+    def maybe_follow(found_img):
+        """确认本房间有福袋后才点一次关注；同一房间只尝试一次。
+
+        传进来的是「命中福袋、还没点开面板」的那张图，头部按钮位置是准的。
+        """
+        nonlocal followed_room
+        if followed_room == cur_room:
+            return
+        followed_room = cur_room
+        r = fa.follow_anchor(found_img)
+        if r:
+            fa.log_csv("follow", f"{cur_room} {r}")
+
     def track_click(rem):
         """点到「一键发表评论」后才算一轮（main 里只有 commented 才会调到这里）。
 
@@ -338,11 +353,6 @@ def main():
                 fa.log(f"当前直播间: {name}")
                 fa.log_csv("room", name)
                 room_rounds = pick_rounds(name, rounds_min, rounds_max)
-                r = fa.follow_anchor(img)
-                if r:
-                    fa.log_csv("follow", f"{name} {r}")
-                    if r == "followed":
-                        img = fa.shot()
             elif name != cur_room:
                 # 暂时只检测标题变化，不自动切房：不重置轮次、不关注新主播
                 if same_room(name, cur_room, float(fa.cfg("detect", "room_similarity"))):
@@ -437,7 +447,7 @@ def main():
             # 只有到整轮检测时间才点福袋；其余巡检只抓标题，快速发现切房
             if now >= next_bag_ts:
                 bag_touched = True
-                img2, info = fa.open_bag_panel(img)
+                img2, info = fa.open_bag_panel(img, before_tap=maybe_follow)
                 if img2 is None:
                     fa.log(f"未见福袋图标: {info}")
                 else:

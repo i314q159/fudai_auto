@@ -193,11 +193,14 @@ def handle_panel(img):
     return ("joined_now" if clicked else "unknown"), rem, ";".join(clicked), commented
 
 
-def open_bag_panel(img):
+def open_bag_panel(img, before_tap=None):
     """点福袋图标打开面板，返回 (新截图或 None, 说明)。
 
     注意：样本只在「点击后面板真正打开」时才写入数据集，
     避免误检（券图标、头像等）污染训练数据。
+
+    before_tap: 可选回调，在「确认命中福袋、还没点下去」时调用（参入这张图）。
+    主循环用它来「先确认本房间有福袋，再点关注」。
     """
     pos = find_bag(img)
     if not pos:
@@ -218,6 +221,11 @@ def open_bag_panel(img):
         return None, detail
 
     cx, cy, src = pos
+    if before_tap is not None:
+        try:
+            before_tap(img)
+        except Exception as e:
+            log(f"命中福袋后的附加动作失败(忽略): {e}")
     tap(cx, cy)
     time.sleep(1.4)
     img2 = shot()
