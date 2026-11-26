@@ -116,7 +116,7 @@ def pipeline():
     label(d, (60, 125), "采集在运行主循环里自动完成；训练统一入口 train.ps1，样本不足走种子图冷启动", fs, MUTED, "la")
 
     # 采集
-    box(d, (700, 180, 1700, 340), "采集：main.py 主循环 → fudai_auto.py",
+    box(d, (700, 180, 1700, 340), "采集：main.py 主循环 → fudai_auto 包",
         "adb 截图定位福袋 → 打开面板 → 确认参与成功才采集\n裁 120×90 图标，同状态 60s 节流 + 像素差去重",
         BLUE, BLUE_BG, fb, fbd)
     # 训练入口
@@ -139,7 +139,7 @@ def pipeline():
     label(d, (1224, 692), "分类决策", fs, MUTED, "lm")
 
     # 冷启动分支
-    box(d, (160, 1010, 920, 1250), "bootstrap_fudai_clf.py 冷启动",
+    box(d, (160, 1010, 920, 1250), "bootstrap_fudai_clf 冷启动",
         "种子图 → 粉色主体定位 → 7 正 + 120 负\n强正则线性判别，自评 F1 选阈值 → --install\n输出 fudai_clf.npz，旧模型备份 .prev",
         ORANGE, ORANGE_BG, fb, fbd)
     arrow(d, (920, 830), (540, 830), GRAY, 4)
@@ -147,7 +147,7 @@ def pipeline():
     label(d, (740, 800), "否（样本太少）", fs, MUTED)
 
     # 全量分支
-    box(d, (1000, 1010, 1500, 1210), "train_fudai_clf.py 检测模型",
+    box(d, (1000, 1010, 1500, 1210), "train_fudai_clf 检测模型",
         "HOG + HSV 特征 → 线性判别\n正样本：重裁 + 增强\n负样本：shots 滑窗避开真实框",
         GREEN, GREEN_BG, fb, fbd)
     box(d, (1560, 1010, 2160, 1210), "train_fudai.py 状态模型",
@@ -192,7 +192,7 @@ def runtime_loop():
     fs = f(27)
     fb = f(26, True)
     fbd = f(23)
-    label(d, (60, 45), "运行时：入口与单轮巡检循环（main.py + fudai_auto.py）", ft, INK, "la")
+    label(d, (60, 45), "运行时：入口与单轮巡检循环（main.py + fudai_auto 包）", ft, INK, "la")
     label(d, (60, 115), "标题变化 = 重置并重新检测福袋（不自动关注）；标题不变按预定节奏蹲守", fs, MUTED, "la")
 
     # 入口
@@ -212,7 +212,7 @@ def runtime_loop():
     label(d, (1324, 650), "开始巡检", fs, MUTED, "lm")
 
     box(d, (900, 930, 1700, 1150), "1. OCR 直播间标题",
-        "首见 → 点一次主播「关注」\n标题变化 → 重置轮次 / 开奖时间，立即重新检测（不自动关注）\n标题不变 → 按 [pacing] 预定节奏蹲守；无标题超阈值则跳过福袋检查",
+        "首见 → 点一次主播「关注」\n标题变化 → 重置轮次 / 开奖时间，立即重新检测（不自动关注）\n标题不变 → 每 60 秒检查一次福袋；无标题超阈值则跳过福袋检查",
         ORANGE, ORANGE_BG, fb, fbd)
     arrow(d, (1300, 860), (1300, 930))
 
@@ -239,8 +239,8 @@ def runtime_loop():
     label(d, (1300, 1618), "复用 handle_panel()", f(22), MUTED)
 
     # 收尾
-    box(d, (500, 1860, 1900, 2050), "汇总：读倒计时 → 排开奖 → 自适应休眠",
-        "rem → next_draw_ts；倒计时「回跳」识别新一轮福袋\n巡检节奏 / 开奖窗口 / 截图重试等待全部读 config.toml\n结果与参与记录写 log/fudai_log.csv",
+    box(d, (500, 1860, 1900, 2050), "汇总：读倒计时 → 排开奖 → 固定 1 分钟巡检",
+        "rem → next_draw_ts；真实点击参与才计一轮（只看剩余时间不计）\n满 max_rounds 轮上滑切下一间（默认等第 5 轮开奖）\n巡检节奏固定 60s / 开奖窗口 / 截图重试等待读 config.toml\n结果与参与记录写 log/fudai_log.csv",
         ORANGE, ORANGE_BG, fb, fbd)
     arrow(d, (725, 1770), (725, 1860))
     arrow(d, (1875, 1790), (1875, 1860))
@@ -248,7 +248,7 @@ def runtime_loop():
     # 回环
     d.line([(500, 1955), (60, 1955), (60, 240), (900, 240)], fill=GRAY, width=3)
     d.polygon([(900, 240), (886, 233), (886, 247)], fill=GRAY)
-    label(d, (78, 700), "下一轮（不离开直播间）", f(24), MUTED, "lm")
+    label(d, (78, 700), "下一轮（满轮次则切房）", f(24), MUTED, "lm")
 
     # 侧注
     box(d, (150, 400, 780, 610), "运行前提",
@@ -257,8 +257,8 @@ def runtime_loop():
     box(d, (150, 930, 780, 1150), "产物目录 log/",
         "run_*.log 运行日志\nfudai_log.csv 参与 / 标题变化 / 开奖记录\nshots/*.png 关键节点截图",
         GRAY, GRAY_BG, fb, fbd)
-    box(d, (1800, 690, 2340, 880), "开奖弹窗先记录",
-        "OCR 到「恭喜 / 很遗憾 / 中奖」\n→ 存图 + 写 csv，再继续巡检",
+    box(d, (1800, 690, 2340, 880), "开奖/中奖弹层：统一关闭",
+        "OCR 到「恭喜抽中 / 未中奖 / 领取奖品」\n→ 文字按钮 / 卡片 × / 返回键\n→ 关掉后立刻回到福袋检测",
         GRAY, GRAY_BG, fb, fbd)
     arrow(d, (1700, 775), (1800, 775), GRAY, 3, dashed=True, head=12)
 
@@ -272,3 +272,4 @@ def runtime_loop():
 if __name__ == "__main__":
     print(pipeline())
     print(runtime_loop())
+

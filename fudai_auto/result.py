@@ -1,0 +1,116 @@
+# -*- coding: utf-8 -*-
+"""开奖结果弹层：识别、统一关闭、开奖窗口观察。
+
+中奖卡与未中奖卡共用一套关闭逻辑：
+  文字按钮（我知道了/确定/开心收下…） -> OCR 找卡片右上角 × -> 固定关闭位 -> 返回键兜底
+故意不点「填写地址 / 领取奖品」，避免跳到领奖页离开直播间。
+"""
+import time
+
+from .config import cfg
+from .device import adb, shot, tap
+from .layout import (
+    RESULT_BTN_TEXTS, RESULT_KEYS, RESULT_ROI, WIN_CLOSE_POINTS,
+    crop, sc_pt, sc_roi, sx, sy,
+)
+from .logbook import log, log_csv, save
+from .ocrkit import ocr, texts_of
+
+
+def result_present(text):
+    """是否出现开奖/中奖弹层文案（text 可以是字符串或 ocr 文本列表）。"""
+    return any(k in text for k in RESULT_KEYS)
+
+
+def dismiss_result(img, text=None):
+    """关闭中奖 / 未中奖弹层，返回 (关闭后的截图, 是否已关闭)。
+
+    最多 8 步：每步先找文字按钮，找不到再找 × 图标，最后用固定关闭位；
+    彻底关不掉时按一次返回键（只按一次，防止退出直播间）。
+    """
+    roi_px = sc_roi(RESULT_ROI)
+    if text is None:
+        text = texts_of(ocr(crop(img, roi_px), 0.45))
+
+    back_used = False
+    for step in range(8):
+        if not result_present(text):
+            return img, True
+
+        items = ocr(crop(img, roi_px), 0.4)
+        hit = None
+        # 1) 优先点关闭类文字按钮
+        for kw in RESULT_BTN_TEXTS:
+            hit = next((i for i in items if kw in i["text"]), None)
+            if hit:
+                break
+        # 2) 再找 × / X（限制尺寸，避免把别的小图标当成关闭按钮）
+        if hit is None:
+            hit = next(
+                (
+                    i
+                    for i in items
+                    if i["text"].strip() in ("×", "X", "x", "✕", "✖")
+                    and sx(18) <= i["w"] <= sx(100)
+                    and sy(18) <= i["h"] <= sy(100)
+                ),
+                None,
+            )
+
+        if hit is not None:
+            tap(
+                roi_px[0] + hit["x"] + hit["w"] / 2,
+                roi_px[1] + hit["y"] + hit["h"] / 2,
+            )
+            log(f"开奖弹层点击「{hit['text'][:10]}」")
+        elif step < len(WIN_CLOSE_POINTS):
+            # 3) 固定关闭位（中奖卡的圆形 × 是图形，OCR 常常读不出文字）
+            x, y = sc_pt(*WIN_CLOSE_POINTS[step])
+            tap(x, y)
+            log(f"开奖弹层点击关闭位 ({x},{y})")
+        elif not back_used:
+            # 4) 最后兜底：按一次返回键
+            back_used = True
+            log("开奖弹层仍关不掉，按一次返回键")
+            adb("shell", "input", "keyevent", "4")
+        else:
+            break
+
+        time.sleep(1.2)
+        img = shot()
+        text = texts_of(ocr(crop(img, roi_px), 0.4))
+
+    closed = not result_present(text)
+    log("开奖弹层已关闭，回到福袋检测" if closed else "开奖弹层未关闭，下一轮继续尝试")
+    return img, closed
+
+
+def watch_result(seconds=None):
+    """开奖观察窗口：轮询截图等待中奖/未中奖文案，命中就关闭并记录。
+
+    返回前会把截图和 CSV 事件写好，供复盘（result / result_dismiss）。
+    """
+    if seconds is None:
+        seconds = float(cfg("detect", "watch_seconds"))
+    t_end = time.time() + seconds
+    last = 0
+    poll = float(cfg("watch", "poll_seconds"))
+    log_every = float(cfg("watch", "log_every_seconds"))
+
+    while time.time() < t_end:
+        img = shot()
+        t = texts_of(ocr(crop(img, sc_roi(RESULT_ROI)), 0.45))
+        hits = [k for k in RESULT_KEYS if k in t]
+        if hits:
+            save(img, "result")
+            log(f"开奖窗口命中 {hits}: {t[:80]}")
+            log_csv("result", f"{hits} | {t[:120]}")
+            img2, closed = dismiss_result(img, t)
+            log_csv("result_dismiss", "closed" if closed else "still_visible")
+            if closed:
+                save(img2, "result_closed")
+            return
+        if time.time() - last > log_every:
+            last = time.time()
+            log(f"等待开奖中… {t[:40]}")
+        time.sleep(poll)

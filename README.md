@@ -35,8 +35,11 @@ uv pip install -r requirements.txt
 
 | 段 | 键 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `[run]` | `minutes` | 180 | 运行时长（分钟） |
-| | `interval` | 60 | 基础巡检间隔 |
+| `[run]` | `minutes` | 1440 | 运行时长（分钟） |
+| | `interval` | 60 | 福袋面板检查间隔（固定 1 分钟一次） |
+| `[room]` | `max_rounds` | 5 | 每个直播间蹲满几轮福袋后上滑切下一间（0 = 不切） |
+| | `switch_after_last_draw` | true | true 等第 5 轮开奖结果出来再切；false 第 5 轮点完立刻切 |
+| | `swipe_attempts` | 3 | 上滑切房失败重试次数 |
 | `[cold_start]` | `below` | 30 | 样本数低于该值走种子图 bootstrap |
 | `[detect]` | `shot_retry_seconds` | 10 | 截图异常后的重试等待 |
 | | `shot_error_log_every_seconds` | 30 | 连续截图异常的日志节流 |
@@ -44,14 +47,11 @@ uv pip install -r requirements.txt
 | | `room_similarity` | 0.86 | 标题相似度≥该值视为同一房间，防 OCR 尾字抖动误判 |
 | | `room_missing_warn_seconds` | 180 | 连续多久没标题就警告 |
 | | `default_draw_seconds` | 750 | 读不到倒计时的默认排期 |
-| | `new_cycle_jump_seconds` | 90 | 倒计时回跳多少秒算新一轮 |
+| | `new_cycle_jump_seconds` | 90 | 同一福袋重复点击时，倒计时回跳超过该值才算新一轮（仅真实点击参与后判定） |
 | | `watch_seconds` | 90 | 开奖观察窗口时长 |
 | | `draw_margin_seconds` | 3 | 提前多少秒进观察窗口 |
 | | `panel_settle_seconds` | 1 | 面板处理后的隔拍 |
-| `[pacing]` | `slow_remaining_seconds` / `slow_interval` | 600 / 180 | 剩余 >10 分钟时的巡检间隔 |
-| | `mid_remaining_seconds` / `mid_interval` | 240 / 90 | 剩余 >4 分钟时的巡检间隔 |
-| | `near_min_seconds` | 20 | 临近开奖的下限间隔 |
-| | `min_sleep_seconds` | 1.5 | 每轮最短休眠 |
+| `[pacing]` | `min_sleep_seconds` | 1.5 | 每轮最短休眠（检查间隔固定读 `[run].interval`） |
 | `[sample]` | `throttle_seconds` | 60 | 同状态样本采集节流 |
 | `[watch]` | `poll_seconds` | 3 | 开奖窗口内截图/识别间隔 |
 | | `log_every_seconds` | 20 | “等待开奖中”日志节流 |
@@ -76,11 +76,11 @@ uv pip install -r requirements.txt
 .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动全量重训（常驻）
 ```
 
-冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`bootstrap_fudai_clf.py`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。`main.py` 启动时读 `config.toml [cold_start].below`（默认 30）做同样判断：没有检测模型且样本不足，会先 bootstrap 再热加载。`train.ps1` 的 `-ColdStartBelow` 是独立参数，改阈值时两边保持一致。
+冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`python -m bootstrap_fudai_clf`），只做“点火”；样本涨到阈值后再跑全量训练。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。`main.py` 启动时读 `config.toml [cold_start].below`（默认 30）做同样判断：没有检测模型且样本不足，会先 bootstrap 再热加载。`train.ps1` 的 `-ColdStartBelow` 是独立参数，改阈值时两边保持一致。
 
 | 文件 | 用途 | 训练脚本 |
 | --- | --- | --- |
-| `data\fudai\model\fudai_clf.npz` | 运行时检测福袋位置（`w/thresh/win_w/win_h`） | `train_fudai_clf.py` 或 `bootstrap_fudai_clf.py` |
+| `data\fudai\model\fudai_clf.npz` | 运行时检测福袋位置（`w/thresh/win_w/win_h`） | `python -m train_fudai_clf` 或 `python -m bootstrap_fudai_clf` |
 | `data\fudai\model\fudai_state.npz` | 3 分类状态（待参与/已参与/倒计时），只做分析 | `train_fudai.py` |
 
 重训后下次启动 `main.py` 时加载新权重；冷启动路径会当场调用 `reload_clf()` 热加载。
@@ -99,7 +99,7 @@ adb devices                       # 确认设备已授权
 
 - **只要流程能跑**：直接启动 `main.py`。检测模型缺失且样本 <30 时，会自动找 `data/fudai/seed/` 下的种子图做 bootstrap；没有种子图会在日志里明确报错。
 - **要接着原来的数据练**：把旧机器的整个 `data/fudai/` 拷过来（icons、labels.csv、seed、model 一起），再按需跑 `.\train.ps1`。
-- 手机换了：`--serial` 或环境变量 `FUDAI_SERIAL` 覆盖；分辨率仍按 1080×2400 的 ROI 设计，换分辨率要改 `fudai_auto.py` 顶部 ROI。
+- 手机换了：`--serial` 或环境变量 `FUDAI_SERIAL` 覆盖；ROI 与点击坐标统一按 1080×2400 设计，运行时按实际截图宽高自动等比缩放（`SCALE` + `sc_roi()`/`sc_pt()`），换分辨率不用改代码。可用 `python check_resolution.py <截图>` 离线验证多种尺寸下的福袋定位、标题、倒计时与开奖文案识别。
 
 ## 流程图
 
@@ -123,18 +123,45 @@ adb devices                       # 确认设备已授权
    - 出现抖币/支付确认 → 不自动支付，记 `need_payment` 并停手
    - 显示「任务已完成 等待开奖」→ 已参与，关闭面板继续
 4. 只有面板确认参与成功才裁 120×90 图标入训练集，防止误检污染数据。
-5. 读面板倒计时排开奖时间；倒计时“回跳”识别新一轮福袋；临近开奖进 90 秒观察窗口，识别「中奖 / 未中奖」并记录。
-6. 自适应节奏：剩余 >10 分钟每 3 分钟查一次，>4 分钟每 90 秒，临近开奖加密到 30 秒内，并保证不越过开奖时刻。
-7. 常亮保护：脚本外已设置 `screen_off_timeout` 最大、`stay_on_while_plugged_in`；截图失败会自动重连 adb、重启 adb server、退回 shell+pull。
+5. 读面板倒计时排开奖时间；**只有真实点击参与才算一轮**——只在面板查看剩余时间、或重复点同一个福袋都不计轮次（重复点击时倒计时回跳超过 `new_cycle_jump_seconds` 才判为新袋）；临近开奖进 90 秒观察窗口，识别「中奖 / 未中奖」。**中奖卡和未中奖卡用同一套关闭逻辑**：文字按钮（我知道了/确定/开心收下）→ 卡片关闭 ×（约 `(540,1704)`）→ 返回键兜底，关掉后立即回到福袋检测；中奖卡的「填写地址 领取奖品」不点，避免跳去领奖页。
+6. 每个直播间蹲满 `[room].max_rounds`（默认 5）轮后上滑切下一间：默认等第 5 轮开奖结果出来再切（`switch_after_last_draw = true`），切房成功后轮次/开奖状态清零、不自动关注新主播；上滑失败按 `swipe_attempts` 重试，全失败则留在原房间重新计轮。
+7. 巡检节奏固定：福袋面板每 60 秒（`[run].interval`）检查一次剩余时间，不再按剩余时间自适应；开奖窗口仍按 `next_draw_ts` 提前 `draw_margin_seconds` 进入，不会漏掉开奖时刻。
+8. 常亮保护：脚本外已设置 `screen_off_timeout` 最大、`stay_on_while_plugged_in`；截图失败会自动重连 adb、重启 adb server、退回 shell+pull。
+9. 分辨率自适应：所有 ROI / 点击点以 1080×2400 为设计基准，`shot()` 每次截图后刷新 `SCALE(x=W/1080, y=H/2400)`；分类器滑窗、模板匹配、样本裁剪、上滑手势、弹层关闭位都按同一系数换算，启动日志会打印当前屏幕尺寸与缩放比。
 
 ## 目录与输出
 
 ```
 main.py              运行入口：CLI / 单实例锁 / 冷启动判断 / 主循环
-fudai_auto.py        底层能力库：截图、OCR、定位、面板、采集、watch_result
-fudai_feat.py        HOG+HSV 特征与滑窗打分，训练/推理共用
-bootstrap_fudai_clf.py  一张种子图冷启动 -> fudai_clf.npz
-train_fudai_clf.py   检测模型训练 -> data/fudai/model/fudai_clf.npz
+fudai_auto/          运行时能力包（对外仍是 import fudai_auto as fa，API 不变）
+  __init__.py        统一导出 + 可变状态转发（fa.SERIAL / fa.RUN_LOG / fa.ROOM_NAME）
+  state.py           可变状态：设备序列号 / 日志路径 / 房间名 / 检测模型
+  paths.py           目录与文件路径
+  config.py          config.toml 读取与默认值
+  logbook.py         运行日志 / 事件 CSV / 截图
+  layout.py          1080×2400 设计坐标 ROI、弹层关键词、分辨率缩放
+  device.py          adb 自愈、截图、点击、上滑
+  ocrkit.py          OCR 引擎与倒计时解析
+  detector.py        福袋定位：分类模型 / 模板匹配 / OCR 反推
+  room.py            直播间标题与关注主播
+  panel.py           福袋面板状态、任务点击、样本入库
+  result.py          开奖弹层识别 / 统一关闭 / 开奖观察窗口
+  dataset.py         福袋样本采集
+fudai_feat/          特征包：HOG+HSV 特征与滑窗打分，训练/推理共用
+  params.py          窗口与特征尺寸常量
+  descriptor.py      单窗口 -> 特征向量
+  sliding.py         ROI 滑窗打分
+train_fudai_clf/     检测模型训练包（python -m train_fudai_clf）
+  paths.py           路径与设计基准
+  samples.py         正/负样本构造
+  train.py           线性判别 + 阈值搜索 + 落盘
+  __main__.py        命令行入口
+bootstrap_fudai_clf/ 冷启动包（python -m bootstrap_fudai_clf）
+  paths.py           模型路径与设计基准
+  seed.py            种子图读取、福袋主体定位
+  samples.py         单图正/负样本构造
+  train.py           强正则判别 + 同帧自评阈值
+  __main__.py        命令行入口
 train_fudai.py       状态模型训练（3 分类 + LOO 评估）-> fudai_state.npz
 train.ps1            一键训练/预测/常驻重训（含冷启动阈值）
 data/fudai/bag_template.png  福袋图标模板（模型缺失时兜底，已入库）
@@ -157,7 +184,7 @@ docs/runtime_loop.png             运行时入口与循环图
 
 样本采集规则：同一状态（待参与/已参与/倒计时）60 秒内只存一张，并对像素做去重；标签取图标下方 OCR 文字（待参与、已参与或倒计时）。
 
-重新训练优先用 `.\train.ps1`（自动汇总样本与负样本、生成报告）；脚本内部等价于分别跑 `train_fudai_clf.py` 和 `train_fudai.py`。样本多了以后重训即可，重启 `main.py` 自动加载新模型。
+重新训练优先用 `.\train.ps1`（自动汇总样本与负样本、生成报告）；脚本内部等价于分别跑 `python -m train_fudai_clf` 和 `train_fudai.py`。样本多了以后重训即可，重启 `main.py` 自动加载新模型。
 
 ## 注意
 

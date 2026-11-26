@@ -18,7 +18,7 @@
 #   .\train.ps1 -Predict data\fudai\icons # 用状态模型预测
 #   .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动重训（常驻）
 #
-# 采集仍由 fudai_auto.py 在运行时自动完成（data\fudai\icons + labels.csv）。
+# 采集仍由 fudai_auto 包在运行时自动完成（data\fudai\icons + labels.csv）。
 # 重训后需重启 main.py 才会加载新权重。
 
 [CmdletBinding()]
@@ -46,8 +46,8 @@ try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new() } catch { }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stateScript = Join-Path $root 'train_fudai.py'
-$detScript = Join-Path $root 'train_fudai_clf.py'
-$bootScript = Join-Path $root 'bootstrap_fudai_clf.py'
+$detModule = Join-Path $root 'train_fudai_clf'
+$bootModule = Join-Path $root 'bootstrap_fudai_clf'
 $iconDir = Join-Path $root 'data\fudai\icons'
 $modelDir = Join-Path $root 'data\fudai\model'
 $detModel = Join-Path $modelDir 'fudai_clf.npz'
@@ -57,8 +57,8 @@ if (-not $SkipState -and -not (Test-Path -LiteralPath $stateScript)) {
     Write-Host "找不到 train_fudai.py: $stateScript" -ForegroundColor Red
     exit 1
 }
-if (-not $SkipDetector -and -not (Test-Path -LiteralPath $detScript)) {
-    Write-Host "找不到 train_fudai_clf.py: $detScript" -ForegroundColor Red
+if (-not $SkipDetector -and -not (Test-Path -LiteralPath $detModule)) {
+    Write-Host "找不到 train_fudai_clf 包: $detModule" -ForegroundColor Red
     exit 1
 }
 
@@ -97,18 +97,22 @@ function Invoke-Detector {
             Write-Host "种子图不存在: $seedPath" -ForegroundColor Red
             return 1
         }
-        if (-not (Test-Path -LiteralPath $bootScript)) {
-            Write-Host "找不到 bootstrap_fudai_clf.py: $bootScript" -ForegroundColor Red
+        if (-not (Test-Path -LiteralPath $bootModule)) {
+            Write-Host "找不到 bootstrap_fudai_clf 包: $bootModule" -ForegroundColor Red
             return 1
         }
-        & $Python @($bootScript, '--seed', $seedPath, '--install') | Out-Host
+        Push-Location $root
+        try { & $Python @('-m', 'bootstrap_fudai_clf', '--seed', $seedPath, '--install') | Out-Host }
+        finally { Pop-Location }
         return $LASTEXITCODE
     }
 
-    $a = @($detScript)
+    $a = @('-m', 'train_fudai_clf')
     if ($Dry) { $a += '--dry-run' }
     Write-Host "`n=== [1] 检测模型（样本 $count ≥ 阈值 $ColdStartBelow） $(if ($Dry) { '(dry-run)' } else { $detModel }) ===" -ForegroundColor Cyan
-    & $Python @a | Out-Host
+    Push-Location $root
+    try { & $Python @a | Out-Host }
+    finally { Pop-Location }
     return $LASTEXITCODE
 }
 
@@ -179,7 +183,7 @@ if ($Watch) {
             $cost = [int]((Get-Date) - $t0).TotalSeconds
             if ($code -eq 0) {
                 Show-Result
-                Write-Host "训练完成，耗时 ${cost}s（重启 fudai_auto.py 后加载新模型）" -ForegroundColor Green
+                Write-Host "训练完成，耗时 ${cost}s（重启 main.py 后加载新模型）" -ForegroundColor Green
                 $lastCount = $count
             }
             else {

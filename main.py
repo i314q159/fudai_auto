@@ -122,7 +122,7 @@ def ensure_model(cold_start_below):
         return
     fa.log(f"样本 {n} < 阈值 {cold_start_below}，执行种子图冷启动")
     subprocess.run(
-        [sys.executable, os.path.join(fa.ROOT, "bootstrap_fudai_clf.py"),
+        [sys.executable, "-m", "bootstrap_fudai_clf",
          "--seed", seed, "--install"],
         cwd=fa.ROOT, check=False,
     )
@@ -163,8 +163,7 @@ def main():
     ensure_model(args.cold_start_below)
 
     t_end = time.time() + args.minutes * 60
-    bag_count = 0
-    cycle_no = 0
+    bag_count = 0            # 累计参与成功次数（跨直播间）
     next_draw_ts = 0.0
     next_bag_ts = 0.0
     draw_watched = True
@@ -172,23 +171,83 @@ def main():
     room_warned = False
     last_room_seen = time.time()
     last_err_log = 0.0
-    last_rem = None
-    last_rem_ts = 0.0
-    cycle_count = 1
+    cycle_count = 0          # 当前直播间已真实点击参与的轮次
+    click_rem = None         # 上次点击参与时的倒计时，用于判断是否同一个福袋
+    click_ts = 0.0
+    leave_after_draw = False # 本房间已蹲满轮次，等当前轮开奖后切下一间
 
-    def track_cycle(rem):
-        """通过倒计时“回跳”识别新一轮福袋"""
-        nonlocal last_rem, last_rem_ts, cycle_count
-        if rem is None:
-            return
+    max_rounds = int(fa.cfg("room", "max_rounds"))
+    switch_after_draw = bool(fa.cfg("room", "switch_after_last_draw"))
+    swipe_attempts = int(fa.cfg("room", "swipe_attempts"))
+
+    def track_click(rem):
+        """真实点击参与后才算一轮；只查看剩余时间、重复点同一个福袋都不算"""
+        nonlocal click_rem, click_ts, cycle_count
         now = time.time()
-        if last_rem is not None and last_rem_ts:
-            expect = max(0, last_rem - (now - last_rem_ts))
-            if rem > expect + float(fa.cfg("detect", "new_cycle_jump_seconds")):
-                cycle_count += 1
-                fa.log(f"检测到新一轮福袋（第 {cycle_count} 轮），剩余 {rem}s 开奖")
-                fa.log_csv("new_cycle", f"#{cycle_count} rem={rem}")
-        last_rem, last_rem_ts = rem, now
+        jump = float(fa.cfg("detect", "new_cycle_jump_seconds"))
+        is_new = True
+        if click_rem is not None and click_ts:
+            expect = max(0.0, click_rem - (now - click_ts))
+            is_new = rem is None or rem > expect + jump
+        click_rem, click_ts = rem, now
+        if is_new:
+            cycle_count += 1
+            fa.log(f"第 {cycle_count} 轮福袋点击参与，剩余 {rem if rem is not None else '未知'}s 开奖")
+            fa.log_csv("new_cycle", f"#{cycle_count} rem={rem}")
+        else:
+            fa.log(f"同一福袋内再次点击（剩余 {rem if rem is not None else '未知'}s），不计入新一轮")
+            fa.log_csv("click_repeat", f"rem={rem}")
+        return is_new
+
+    def plan_switch():
+        """本房间蹲满 max_rounds 轮就安排切下一间"""
+        nonlocal leave_after_draw, next_draw_ts
+        if max_rounds <= 0 or leave_after_draw or cycle_count < max_rounds:
+            return
+        leave_after_draw = True
+        fa.log(f"直播间「{cur_room}」已蹲满 {cycle_count} 轮福袋，准备切下一间")
+        fa.log_csv("room_rounds_full", f"{cur_room} rounds={cycle_count}")
+        # 等开奖时如果没读到倒计时，按默认时长排期，避免永远等不到观察窗口
+        if switch_after_draw and (not next_draw_ts or next_draw_ts <= time.time()):
+            next_draw_ts = time.time() + float(fa.cfg("detect", "default_draw_seconds"))
+
+    def switch_room():
+        """上滑切下一个直播间；成功后轮次与开奖状态清零"""
+        nonlocal cur_room, cycle_count, click_rem, click_ts
+        nonlocal last_room_seen, next_draw_ts, next_bag_ts, draw_watched, leave_after_draw
+        before = cur_room
+        sim = float(fa.cfg("detect", "room_similarity"))
+        for attempt in range(1, swipe_attempts + 1):
+            try:
+                fa.swipe_next_room()
+                img = fa.shot()
+            except Exception as e:
+                fa.log(f"切房第 {attempt}/{swipe_attempts} 次异常: {e}")
+                time.sleep(2.0)
+                continue
+            name = fa.get_room_name(img)
+            if name and (not before or not same_room(name, before, sim)):
+                fa.log(f"已切到下一间直播间: {before} -> {name}")
+                fa.log_csv("switch_room", f"{before} -> {name}")
+                cur_room = name
+                fa.ROOM_NAME = name
+                last_room_seen = time.time()
+                cycle_count = 0
+                click_rem = None
+                click_ts = 0.0
+                next_draw_ts = 0.0
+                next_bag_ts = 0.0
+                draw_watched = True
+                leave_after_draw = False
+                return name
+            fa.log(f"切房未生效（识别到「{name or '无标题'}」），重试 {attempt}/{swipe_attempts}")
+            fa.save(img, "switch_retry")
+        fa.log(f"连续 {swipe_attempts} 次切房失败，留在当前直播间并重新计轮")
+        cycle_count = 0
+        click_rem = None
+        click_ts = 0.0
+        leave_after_draw = False
+        return None
 
     room_check = float(fa.cfg("detect", "room_check_seconds"))
     fa.log(f"启动福袋蹲守 {args.minutes} 分钟，检查间隔 {args.interval}s，巡房间隔 {room_check}s")
@@ -204,8 +263,6 @@ def main():
                 fa.log_csv("shot_error", str(e)[:80])
             time.sleep(float(fa.cfg("detect", "shot_retry_seconds")))
             continue
-
-        cycle_no += 1
 
         # 抓当前直播间名称：切换房间自动适配
         name = fa.get_room_name(img)
@@ -233,9 +290,10 @@ def main():
                     next_draw_ts = 0.0
                     next_bag_ts = 0.0
                     draw_watched = True
-                    last_rem = None
-                    last_rem_ts = 0.0
-                    cycle_count = 1
+                    cycle_count = 0
+                    click_rem = None
+                    click_ts = 0.0
+                    leave_after_draw = False
                     fa.save(img, "room_title_change")
                     continue
             if args.room and args.room not in name and not room_warned:
@@ -254,13 +312,19 @@ def main():
         margin = float(fa.cfg("detect", "draw_margin_seconds"))
         due_watch = (not draw_watched) and bool(next_draw_ts) and now >= next_draw_ts - margin
 
-        # 开奖弹窗先记录：只在整轮检测或临近开奖时扫，快速巡房不重复 OCR 整屏
+        # 开奖/中奖弹层：识别到就用统一逻辑关掉，先回到福袋检测
         if now >= next_bag_ts or due_watch:
-            rt = fa.texts_of(fa.ocr(fa.crop(img, fa.RESULT_ROI), 0.45))
-            if any(k in rt for k in ("恭喜", "很遗憾", "未中奖", "中奖")):
+            rt = fa.texts_of(fa.ocr(fa.crop(img, fa.sc_roi(fa.RESULT_ROI)), 0.45))
+            if fa.result_present(rt):
                 fa.save(img, "result_popup")
                 fa.log(f"识别到开奖文案: {rt[:60]}")
                 fa.log_csv("result", rt[:120])
+                img, closed = fa.dismiss_result(img, rt)
+                fa.log_csv("result_dismiss", "closed" if closed else "still_visible")
+                if closed:
+                    fa.save(img, "result_closed")
+                    draw_watched = True   # 开奖结果已处理，避免再进一次观察窗口
+                    continue
 
         bag_touched = False
 
@@ -269,12 +333,14 @@ def main():
         if st:
             status, rem, detail = fa.handle_panel(img)
             if status == "joined_now":
-                bag_count += 1
-                fa.log(f"第 {bag_count} 次参与成功({detail})")
-                fa.log_csv("join", f"{cur_room} #{bag_count} {detail} remaining={rem}")
+                if track_click(rem):
+                    bag_count += 1
+                    fa.log(f"第 {bag_count} 次参与成功({detail})")
+                    fa.log_csv("join", f"{cur_room} #{bag_count} {detail} remaining={rem}")
                 if rem is not None:
                     next_draw_ts = time.time() + rem
                     draw_watched = False
+                plan_switch()
             elif rem is not None:
                 next_draw_ts = time.time() + rem
                 draw_watched = False
@@ -284,7 +350,6 @@ def main():
             if status == "need_payment":
                 fa.log("该福袋需要付费（抖币），本房间不再自动点击，请手动处理")
                 fa.log_csv("need_payment", f"{cur_room} {detail}")
-            track_cycle(rem)
             time.sleep(float(fa.cfg("detect", "panel_settle_seconds")))
             bag_touched = True
         else:
@@ -308,12 +373,14 @@ def main():
                     else:
                         status, rem, detail = fa.handle_panel(img2)
                         if status == "joined_now":
-                            bag_count += 1
-                            fa.log(f"第 {bag_count} 次参与成功({detail})")
-                            fa.log_csv("join", f"{cur_room} #{bag_count} {detail} remaining={rem}")
+                            if track_click(rem):
+                                bag_count += 1
+                                fa.log(f"第 {bag_count} 次参与成功({detail})")
+                                fa.log_csv("join", f"{cur_room} #{bag_count} {detail} remaining={rem}")
                             if rem is not None:
                                 next_draw_ts = time.time() + rem
                                 draw_watched = False
+                            plan_switch()
                         elif rem is not None:
                             next_draw_ts = time.time() + rem
                             draw_watched = False
@@ -326,26 +393,31 @@ def main():
                         if status == "need_payment":
                             fa.log("该福袋需要付费（抖币），已暂停自动点击，请手动处理")
                             fa.log_csv("need_payment", f"{cur_room} {detail}")
-                        track_cycle(rem)
+
+        # 配置为“点完第 5 轮立即切房”时，不等开奖直接上滑
+        if leave_after_draw and not switch_after_draw:
+            switch_room()
+            continue
 
         # 开奖窗口（可能正好落在两次整轮检测之间）
         if due_watch:
-            fa.log(f"进入开奖观察窗口（第 {cycle_count} 轮）")
+            if cycle_count:
+                fa.log(f"进入开奖观察窗口（第 {cycle_count} 轮）")
+            else:
+                fa.log("进入开奖观察窗口（本轮未点击参与）")
             fa.watch_result(float(fa.cfg("detect", "watch_seconds")))
             draw_watched = True
+            # 本房间蹲满轮次：看完这一轮开奖就切下一间
+            if leave_after_draw:
+                switch_room()
+                continue
             bag_touched = True
 
-        # 下一轮福袋检测按剩余时间自适应；巡房仍按 room_check 的短节奏
+        # 福袋面板检查固定按 [run].interval（默认 60s = 1 分钟一次），不再按剩余时间自适应
         gap = args.interval
-        if (not draw_watched) and last_rem is not None:
-            if last_rem > float(fa.cfg("pacing", "slow_remaining_seconds")):
-                gap = float(fa.cfg("pacing", "slow_interval"))
-            elif last_rem > float(fa.cfg("pacing", "mid_remaining_seconds")):
-                gap = float(fa.cfg("pacing", "mid_interval"))
-            else:
-                gap = max(float(fa.cfg("pacing", "near_min_seconds")), args.interval)
         if bag_touched:
-            next_bag_ts = time.time() + gap
+            # 从本轮检查起点计时，保证两次面板检查的间隔稳定在 gap 左右
+            next_bag_ts = now + gap
 
         # 睡到最近的事件：下一次整轮检测 / 开奖窗口 / 下一次巡房
         sleep_s = room_check
