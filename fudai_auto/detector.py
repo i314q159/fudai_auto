@@ -15,6 +15,7 @@ import fudai_feat
 
 from . import layout, state
 from .layout import ICON_ROI, SCALE, crop, sc_roi, sx, sy
+from .logbook import log
 from .ocrkit import TIME_RE, ocr
 from .paths import DATASET_DIR, ROOT
 
@@ -36,18 +37,38 @@ CLF_PATH = os.path.join(DATASET_DIR, "model", "fudai_clf.npz")
 
 
 def load_clf():
-    """读取检测模型；换机/重训后可直接热重载，无需重启进程。"""
+    """读取检测模型；换机/重训后可直接热重载，无需重启进程。
+
+    载入时校验权重维度与数值：特征口径变了（改 fudai_feat.params）会在这里被拦下，
+    按「没有模型」处理并回退模板匹配，避免运行时矩阵乘抛错把主循环打断。
+    阈值与训练共用 ``fudai_feat.MIN_THRESH`` 下限，保证线上阈值可复现。
+    """
     state.CLF = None
     try:
-        if os.path.exists(CLF_PATH):
-            m = np.load(CLF_PATH)
-            state.CLF = {
-                "w": m["w"].astype(np.float32),
-                "thresh": max(float(m["thresh"]), 0.12),
-                "win_w": int(m["win_w"]),
-                "win_h": int(m["win_h"]),
-            }
-    except Exception:
+        if not os.path.exists(CLF_PATH):
+            return None
+        m = np.load(CLF_PATH, allow_pickle=False)
+        w = np.asarray(m["w"], dtype=np.float32)
+        expect = fudai_feat.feat(
+            np.zeros((fudai_feat.WIN_H, fudai_feat.WIN_W, 3), np.uint8)
+        ).shape[0] + 1
+        if w.ndim != 1 or w.shape[0] != expect:
+            log(f"检测模型维度不符（{w.shape} != ({expect},)），忽略并回退模板匹配")
+            return None
+        if not np.all(np.isfinite(w)) or not np.any(w):
+            log("检测模型权重非法（含 NaN/Inf 或全零），忽略并回退模板匹配")
+            return None
+        th = float(m["thresh"])
+        if not np.isfinite(th):
+            th = fudai_feat.MIN_THRESH
+        state.CLF = {
+            "w": w,
+            "thresh": max(th, fudai_feat.MIN_THRESH),
+            "win_w": int(m["win_w"]),
+            "win_h": int(m["win_h"]),
+        }
+    except Exception as e:
+        log(f"检测模型加载失败，回退模板匹配: {e}")
         state.CLF = None
     return state.CLF
 

@@ -12,7 +12,8 @@ import os
 from human import adb_conn
 
 # 设备序列号：优先环境变量，其次由 human.adb_conn 探测当前连接的设备
-SERIAL = os.getenv("FUDAI_SERIAL", adb_conn.get_adb_device_serial_via_subprocess())
+# （用 or 而不是 getenv 默认值，避免设置了环境变量还去执行 adb devices）
+SERIAL = os.getenv("FUDAI_SERIAL") or adb_conn.get_adb_device_serial_via_subprocess()
 
 # 当前运行的日志文件路径（main.py 启动时按时间戳设置；None 表示只打印到控制台）
 RUN_LOG = None

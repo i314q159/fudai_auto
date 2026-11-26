@@ -22,7 +22,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", default=os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "data", "fudai", "seed", "seed.png",
+        "data", "fudai", "seed", "seed_vgn.png",
     ))
     ap.add_argument("--out", default=OUT_DEFAULT)
     ap.add_argument("--install", action="store_true",

@@ -2,7 +2,7 @@
 """
 抖音直播间福袋蹲守：运行时主循环与 CLI
 
-实现细节（adb / OCR / 面板处理 / 样本采集）都在 fudai_auto.py，
+实现细节（adb / OCR / 面板处理 / 样本采集）都在 fudai_auto/ 包，
 本文件只负责参数解析、单实例锁、主循环节奏和状态机。
 """
 import argparse
@@ -154,6 +154,13 @@ def main():
         fa.LOG_DIR, f"run_{datetime.now():%Y%m%d_%H%M%S}.log"
     )
 
+    if not fa.SERIAL:
+        fa.log(
+            "未找到 adb 设备：请连接手机并确认 adb devices 已授权，"
+            "或用 --serial / 环境变量 FUDAI_SERIAL 指定"
+        )
+        return
+
     # 单实例锁：旧实例还在时自动结束它并接管
     lock = acquire_instance_lock()
     if lock is None:
@@ -186,9 +193,18 @@ def main():
         now = time.time()
         jump = float(fa.cfg("detect", "new_cycle_jump_seconds"))
         is_new = True
-        if click_rem is not None and click_ts:
-            expect = max(0.0, click_rem - (now - click_ts))
-            is_new = rem is None or rem > expect + jump
+        if click_ts:
+            if rem is None or click_rem is None:
+                # 读不到倒计时：只能按「距上次点击是否超过 new_cycle_jump_seconds」兜底，
+                # 否则同一个福袋会被反复计轮、提前把房间轮次蹲满
+                is_new = now - click_ts >= jump
+                fa.log(
+                    f"倒计时未读到，按距上次点击 {now - click_ts:.0f}s 判定为"
+                    f"{'新' if is_new else '同一'}福袋"
+                )
+            else:
+                expect = max(0.0, click_rem - (now - click_ts))
+                is_new = rem > expect + jump
         click_rem, click_ts = rem, now
         if is_new:
             cycle_count += 1
@@ -325,6 +341,12 @@ def main():
                     fa.save(img, "result_closed")
                     draw_watched = True   # 开奖结果已处理，避免再进一次观察窗口
                     continue
+                # 关不掉时不要在弹层上继续找福袋/乱点：跳过本轮，下一轮再试关
+                draw_watched = True
+                next_bag_ts = time.time() + args.interval
+                fa.save(img, "result_stuck")
+                fa.log("开奖弹层未关闭，本轮跳过福袋检查，下一轮再试")
+                continue
 
         bag_touched = False
 

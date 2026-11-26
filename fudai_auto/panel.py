@@ -43,18 +43,24 @@ PAY_KEYS = ("抖币", "确认支付", "立即支付", "去支付")
 
 
 def pink_button_box(roi_img):
-    """在 ROI 里找底部粉色大按钮，返回 (面积, x, y, w, h) 或 None。"""
+    """在 ROI 里找底部粉色大按钮，返回 (面积, x, y, w, h) 或 None。
+
+    面积/宽度阈值按设计像素定义，这里按当前屏幕缩放换算：传进来的 ROI 已经是
+    实际像素，阈值也必须跟着缩放，否则小屏永远命中不到、大屏又过于宽松。
+    """
     hsv = cv2.cvtColor(roi_img, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, (165, 120, 170), (179, 255, 255))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
     cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_area = 40000 * SCALE["x"] * SCALE["y"]
+    min_w = 500 * SCALE["x"]
     best = None
     for c in cnts:
         area = cv2.contourArea(c)
-        if area < 40000:
+        if area < min_area:
             continue
         x, y, w, h = cv2.boundingRect(c)
-        if w < 500:
+        if w < min_w:
             continue
         if best is None or area > best[0]:
             best = (area, x, y, w, h)
@@ -110,7 +116,9 @@ def handle_panel(img):
         roi = crop(img, panel_px)
         btn = pink_button_box(roi)
         t = texts_of(ocr(roi, 0.45))
-        rem = read_remaining(img) or rem
+        got = read_remaining(img)
+        if got is not None:
+            rem = got
 
         # 情况 1：底部有粉色任务按钮 -> 点一下，再截图检查是否弹付费
         if btn:
@@ -147,7 +155,7 @@ def handle_panel(img):
             if hit:
                 break
         if hit:
-            cx = hit["x"] + hit["w"] / 2
+            cx = wide_roi[0] + hit["x"] + hit["w"] / 2
             cy = wide_roi[1] + hit["y"] + hit["h"] / 2
             log(f"兜底点击「{hit['text']}」({int(cx)},{int(cy)})")
             tap(cx, cy)

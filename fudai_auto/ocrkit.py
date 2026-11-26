@@ -52,11 +52,14 @@ def parse_countdown(text):
         mm, ss = int(m.group(1)), int(m.group(2))
         if mm <= 60 and ss <= 59:
             return mm * 60 + ss
-    # 兜底：截取「已参与」之后的数字（面板右侧倒计时）
-    tail = norm.split("已参与")[-1]
-    nums = re.findall(r"\d{1,2}", tail)
-    if len(nums) >= 2:
-        mm, ss = int(nums[0]), int(nums[1])
+    # 兜底：OCR 把冒号丢了（如「已参与 0317」）。必须先定位到倒计时前面的标签词，
+    # 只解析标签词之后的部分；否则「1234 人观看」这类无关长数字会被读成 12:34
+    tail = re.split(r"已参与|剩余|距结束|倒计时", norm)[-1]
+    if tail == norm:
+        return None
+    m = re.search(r"(\d{1,2})\D{0,2}(\d{1,2})(?!\d)", tail)
+    if m:
+        mm, ss = int(m.group(1)), int(m.group(2))
         if mm <= 60 and ss <= 59:
             return mm * 60 + ss
     return None

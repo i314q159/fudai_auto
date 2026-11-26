@@ -9,11 +9,11 @@
   descriptor.py  单个窗口 -> 特征向量（HOG + HSV 直方图）
   sliding.py     ROI 滑窗打分，返回最佳命中
 """
-from .params import WIN_W, WIN_H, FEA_W, FEA_H, CELL, BINS
+from .params import WIN_W, WIN_H, FEA_W, FEA_H, CELL, BINS, MIN_THRESH
 from .descriptor import resize_win, feat
 from .sliding import locate
 
 __all__ = [
-    "WIN_W", "WIN_H", "FEA_W", "FEA_H", "CELL", "BINS",
+    "WIN_W", "WIN_H", "FEA_W", "FEA_H", "CELL", "BINS", "MIN_THRESH",
     "resize_win", "feat", "locate",
 ]

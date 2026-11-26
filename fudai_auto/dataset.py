@@ -52,6 +52,11 @@ def save_dataset(img, cx, cy, label, src):
     tag = re.sub(r"[^\w\u4e00-\u9fff]", "-", str(label))[:24]
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     p = os.path.join(DATASET_ICONS, f"{ts}_{tag}.png")
+    # 文件名只精确到秒：同一秒内不同标签/来源可能撞名，撞到就加序号，不覆盖已有样本
+    n = 1
+    while os.path.exists(p):
+        p = os.path.join(DATASET_ICONS, f"{ts}_{tag}_{n}.png")
+        n += 1
     cv2.imwrite(p, crop_img)
 
     # 记录标签来源：时间 / 房间 / 标签 / 来源（clf/tpl/ocr）/ 实际 bbox / 文件

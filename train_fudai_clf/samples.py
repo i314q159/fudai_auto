@@ -118,7 +118,9 @@ def negatives(rng, per_frame=140):
             int(round(ICON_ROI[2] * rx)), int(round(ICON_ROI[3] * ry)),
         )
         pb = pink_box(img[roi[1]:roi[3], roi[0]:roi[2]], pad=0)
-        excl = None
+        # 默认排除整块图标区：粉色主体没检出时（例如已参与态图标变色），
+        # 也不能把真图标采成负样本
+        excl = roi
         if pb:
             excl = (roi[0] + pb[0], roi[1] + pb[1], roi[0] + pb[2], roi[1] + pb[3])
 
@@ -129,10 +131,7 @@ def negatives(rng, per_frame=140):
         for y in range(0, img.shape[0] - win_h, 30):
             for x in range(0, img.shape[1] - win_w, 30):
                 b = (x, y, x + win_w, y + win_h)
-                if excl and iou(b, excl) > 0.08:
-                    continue
-                # 找不到图标框时，至少跳过顶部标题栏，避免采到主播名/头像
-                if not excl and y < int(540 * ry):
+                if iou(b, excl) > 0.08:
                     continue
                 boxes.append(b)
         rng.shuffle(boxes)

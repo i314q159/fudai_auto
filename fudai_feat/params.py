@@ -17,3 +17,8 @@ FEA_H = 48
 CELL = 8
 # HOG 方向分箱数量（0~180°）
 BINS = 9
+
+# 判定阈值下限：训练（train_fudai_clf / bootstrap_fudai_clf）与运行时
+# （fudai_auto.detector）共用同一个数，保证「训练评估的阈值」就是「线上用的阈值」，
+# 同时避免退化模型在 0 分附近把背景误判成福袋。
+MIN_THRESH = 0.12

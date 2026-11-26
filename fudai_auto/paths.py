@@ -2,7 +2,8 @@
 """运行时用到的目录 / 文件路径。
 
 注意：ROOT 是「仓库根目录」，不是包目录——本文件在 fudai_auto/ 里，
-所以要往上退一级。main.py 用 fa.ROOT 拼 bootstrap 入口和 config.toml。
+所以要往上退一级。main.py 把 fa.ROOT 作为 bootstrap 子进程的工作目录，
+config.py 用 ROOT 拼 config.toml 的路径。
 """
 import os
 

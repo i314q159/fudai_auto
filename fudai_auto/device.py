@@ -21,6 +21,11 @@ from .paths import LOG_DIR
 
 def adb(*args, timeout=15):
     """执行 adb 子命令（自动带 -s 序列号），返回 (stdout, stderr)。"""
+    if not state.SERIAL:
+        raise RuntimeError(
+            "未指定 adb 设备：请连接手机并确认 adb devices 已授权，"
+            "或用 --serial / 环境变量 FUDAI_SERIAL 指定"
+        )
     r = subprocess.run(
         ["adb", "-s", state.SERIAL] + list(args),
         capture_output=True, timeout=timeout,
@@ -30,6 +35,8 @@ def adb(*args, timeout=15):
 
 def device_state():
     """返回 'device' / 'offline' / 'absent'：当前序列号在 adb 里的状态。"""
+    if not state.SERIAL:
+        return "absent"
     try:
         out = subprocess.run(
             ["adb", "devices"], capture_output=True, timeout=10

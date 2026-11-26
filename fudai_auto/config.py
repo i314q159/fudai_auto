@@ -32,6 +32,28 @@ DEFAULT_CONFIG = {
 CONFIG_PATH = os.path.join(ROOT, "config.toml")
 
 
+def _keep_type(section, key, val, default):
+    """按内置默认值的类型校验配置值；类型不符时打印提示并沿用默认值。
+
+    bool 单独判断（Python 里 True 是 int 的子类，不单独处理会把 1/0 当开关值）；
+    浮点键允许写整数（toml 里 60 和 60.0 等价），统一转成 float。
+    """
+    if isinstance(default, bool):
+        ok, want = isinstance(val, bool), "true/false"
+    elif isinstance(default, int):
+        ok, want = isinstance(val, int) and not isinstance(val, bool), "整数"
+    elif isinstance(default, float):
+        ok, want = isinstance(val, (int, float)) and not isinstance(val, bool), "数字"
+        if ok:
+            val = float(val)
+    else:
+        ok, want = isinstance(val, type(default)), type(default).__name__
+    if not ok:
+        print(f"[config] [{section}].{key} 期望 {want}，实际 {val!r}，已按默认值 {default!r} 处理")
+        return default
+    return val
+
+
 def _load_config():
     """读 config.toml：已知段/键才覆盖，未知段/键打印提示并忽略（防止拼错静默生效）。"""
     cfg = {sec: dict(vals) for sec, vals in DEFAULT_CONFIG.items()}
@@ -49,7 +71,7 @@ def _load_config():
             continue
         for key, val in vals.items():
             if key in cfg[sec]:
-                cfg[sec][key] = val
+                cfg[sec][key] = _keep_type(sec, key, val, cfg[sec][key])
             else:
                 print(f"[config] 忽略未知键 [{sec}].{key}")
     return cfg

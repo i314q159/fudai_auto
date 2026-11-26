@@ -25,15 +25,14 @@ def result_present(text):
 def dismiss_result(img, text=None):
     """关闭中奖 / 未中奖弹层，返回 (关闭后的截图, 是否已关闭)。
 
-    最多 8 步：每步先找文字按钮，找不到再找 × 图标，最后用固定关闭位；
-    彻底关不掉时按一次返回键（只按一次，防止退出直播间）。
+    最多走 len(WIN_CLOSE_POINTS)+1 轮：每轮先找文字按钮，再找 × 图标，
+    都没有就依次点固定关闭位；最后一轮按一次返回键（只按一次，防止退出直播间）。
     """
     roi_px = sc_roi(RESULT_ROI)
     if text is None:
         text = texts_of(ocr(crop(img, roi_px), 0.45))
 
-    back_used = False
-    for step in range(8):
+    for step in range(len(WIN_CLOSE_POINTS) + 1):
         if not result_present(text):
             return img, True
 
@@ -68,13 +67,10 @@ def dismiss_result(img, text=None):
             x, y = sc_pt(*WIN_CLOSE_POINTS[step])
             tap(x, y)
             log(f"开奖弹层点击关闭位 ({x},{y})")
-        elif not back_used:
-            # 4) 最后兜底：按一次返回键
-            back_used = True
+        else:
+            # 4) 最后兜底：按一次返回键（只按一次，防止退出直播间）
             log("开奖弹层仍关不掉，按一次返回键")
             adb("shell", "input", "keyevent", "4")
-        else:
-            break
 
         time.sleep(1.2)
         img = shot()
