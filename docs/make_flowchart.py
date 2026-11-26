@@ -258,7 +258,7 @@ def runtime_loop():
         "run_*.log 运行日志\nfudai_log.csv 参与 / 标题变化 / 开奖记录\nshots/*.png 关键节点截图",
         GRAY, GRAY_BG, fb, fbd)
     box(d, (1800, 690, 2340, 880), "开奖/中奖弹层：统一关闭",
-        "OCR 到「恭喜抽中 / 未中奖 / 领取奖品」\n→ 文字按钮 / 卡片 × / 返回键\n→ 关掉后立刻回到福袋检测",
+        "OCR 到「恭喜抽中 / 未中奖 / 领取奖品」\n→ 文字按钮 / 卡片 × / 等自动关闭\n→ 关掉后立刻回到福袋检测",
         GRAY, GRAY_BG, fb, fbd)
     arrow(d, (1700, 775), (1800, 775), GRAY, 3, dashed=True, head=12)
 
