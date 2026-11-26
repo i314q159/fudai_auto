@@ -11,7 +11,7 @@ min_rounds = 3                  # 进入直播间时在 min~max 之间随机决�
 max_rounds = 9                  # 蹲守轮数上限；0 = 不切房
 switch_after_last_draw = true   # true: 等最后一轮开奖结果出来再切；false: 最后一轮点完立刻切
 swipe_attempts = 3              # 上滑切房失败重试次数
-no_bag_switch_scans = 10        # 连续多少次没认出福袋图标就切房；0 = 不按此切房
+no_bag_switch_scans = 20        # 连续多少次没认出福袋图标就切房；0 = 不按此切房
 
 [cold_start]
 below = 30                      # 样本数低于该值走种子图冷启动
