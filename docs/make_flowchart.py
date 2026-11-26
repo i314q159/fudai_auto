@@ -150,7 +150,7 @@ def pipeline():
     box(d, (1000, 1010, 1500, 1210), "train_fudai_clf 检测模型",
         "HOG + HSV 特征 → 线性判别\n正样本：重裁 + 增强\n负样本：shots 滑窗避开真实框",
         GREEN, GREEN_BG, fb, fbd)
-    box(d, (1560, 1010, 2160, 1210), "train_fudai.py 状态模型",
+    box(d, (1560, 1010, 2160, 1210), "train_fudai 状态模型",
         "softmax 3 分类\n待参与 / 已参与 / 倒计时\n类别 < 2 自动跳过",
         GREEN, GREEN_BG, fb, fbd)
     arrow(d, (1480, 830), (1860, 830))
@@ -272,4 +272,5 @@ def runtime_loop():
 if __name__ == "__main__":
     print(pipeline())
     print(runtime_loop())
+
 

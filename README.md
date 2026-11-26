@@ -81,7 +81,7 @@ uv pip install -r requirements.txt
 | 文件 | 用途 | 训练脚本 |
 | --- | --- | --- |
 | `data\fudai\model\fudai_clf.npz` | 运行时检测福袋位置（`w/thresh/win_w/win_h`） | `python -m train_fudai_clf` 或 `python -m bootstrap_fudai_clf` |
-| `data\fudai\model\fudai_state.npz` | 3 分类状态（待参与/已参与/倒计时），只做分析 | `train_fudai.py` |
+| `data\fudai\model\fudai_state.npz` | 3 分类状态（待参与/已参与/倒计时），只做分析 | `python -m train_fudai` |
 
 重训后下次启动 `main.py` 时加载新权重；冷启动路径会当场调用 `reload_clf()` 热加载。
 
@@ -162,7 +162,14 @@ bootstrap_fudai_clf/ 冷启动包（python -m bootstrap_fudai_clf）
   samples.py         单图正/负样本构造
   train.py           强正则判别 + 同帧自评阈值
   __main__.py        命令行入口
-train_fudai.py       状态模型训练（3 分类 + LOO 评估）-> fudai_state.npz
+train_fudai/         状态模型训练包（python -m train_fudai，3 分类 + LOO 评估）
+  paths.py           路径与类别常量
+  dataset.py         样本装载、标签归一化、统计、稳定随机种子
+  features.py        HOG + HSV 特征、数据增强
+  model.py           softmax 分类器与模型存取
+  eval.py            留一交叉验证
+  cli.py             训练 / 预测流程与参数
+  __main__.py        命令行入口
 train.ps1            一键训练/预测/常驻重训（含冷启动阈值）
 data/fudai/bag_template.png  福袋图标模板（模型缺失时兜底，已入库）
 requirements.txt     依赖
@@ -185,7 +192,7 @@ tests/check_resolution.py         离线分辨率自检（缩放假截图跑检�
 
 样本采集规则：同一状态（待参与/已参与/倒计时）60 秒内只存一张，并对像素做去重；标签取图标下方 OCR 文字（待参与、已参与或倒计时）。
 
-重新训练优先用 `.\train.ps1`（自动汇总样本与负样本、生成报告）；脚本内部等价于分别跑 `python -m train_fudai_clf` 和 `train_fudai.py`。样本多了以后重训即可，重启 `main.py` 自动加载新模型。
+重新训练优先用 `.\train.ps1`（自动汇总样本与负样本、生成报告）；脚本内部等价于分别跑 `python -m train_fudai_clf` 和 `python -m train_fudai`。样本多了以后重训即可，重启 `main.py` 自动加载新模型。
 
 ## 注意
 

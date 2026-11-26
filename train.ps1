@@ -45,7 +45,7 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new() } catch { }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$stateScript = Join-Path $root 'train_fudai.py'
+$stateModule = Join-Path $root 'train_fudai'
 $detModule = Join-Path $root 'train_fudai_clf'
 $bootModule = Join-Path $root 'bootstrap_fudai_clf'
 $iconDir = Join-Path $root 'data\fudai\icons'
@@ -53,8 +53,8 @@ $modelDir = Join-Path $root 'data\fudai\model'
 $detModel = Join-Path $modelDir 'fudai_clf.npz'
 $stateModel = if ($Model) { $Model } else { Join-Path $modelDir 'fudai_state.npz' }
 
-if (-not $SkipState -and -not (Test-Path -LiteralPath $stateScript)) {
-    Write-Host "找不到 train_fudai.py: $stateScript" -ForegroundColor Red
+if (-not $SkipState -and -not (Test-Path -LiteralPath $stateModule)) {
+    Write-Host "找不到 train_fudai 包: $stateModule" -ForegroundColor Red
     exit 1
 }
 if (-not $SkipDetector -and -not (Test-Path -LiteralPath $detModule)) {
@@ -118,14 +118,16 @@ function Invoke-Detector {
 
 function Invoke-State {
     param([switch]$Dry)
-    $a = @($stateScript, '--aug', $Aug, '--epochs', $Epochs)
+    $a = @('-m', 'train_fudai', '--aug', $Aug, '--epochs', $Epochs)
     if ($Dry) { $a += '--dry-run' }
     if ($Labels) { $a += @('--labels', $Labels) }
     if ($Model) { $a += @('--model', $Model) }
     if ($Extra.Count -gt 0 -and $Extra[0]) { $a += @('--extra') + $Extra }
     if ($ExtraLabel) { $a += @('--extra-label', $ExtraLabel) }
     Write-Host "`n=== [2] 状态模型 $(if ($Dry) { '(dry-run)' } else { $stateModel }) ===" -ForegroundColor Cyan
-    & $Python @a | Out-Host
+    Push-Location $root
+    try { & $Python @a | Out-Host }
+    finally { Pop-Location }
     return $LASTEXITCODE
 }
 
@@ -164,9 +166,11 @@ function Invoke-All {
 
 # ---- 预测模式 ----
 if ($Predict) {
-    $a = @($stateScript, '--predict', $Predict)
+    $a = @('-m', 'train_fudai', '--predict', $Predict)
     if ($Model) { $a += @('--model', $Model) }
-    & $Python @a
+    Push-Location $root
+    try { & $Python @a }
+    finally { Pop-Location }
     exit $LASTEXITCODE
 }
 
