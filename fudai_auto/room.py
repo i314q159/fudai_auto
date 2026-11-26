@@ -45,7 +45,7 @@ def follow_anchor(img):
             cx = roi_px[0] + i["x"] + i["w"] / 2
             cy = roi_px[1] + i["y"] + i["h"] / 2
             tap(cx, cy)
-            time.sleep(1.2)
+            time.sleep(0.6)
             log(f"已点击关注主播 ({int(cx)},{int(cy)})")
             return "followed"
     return None

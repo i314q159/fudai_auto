@@ -26,7 +26,8 @@ default_draw_seconds = 300.0    # 读不到倒计时时的默认排期（5 分�
 new_cycle_jump_seconds = 90.0   # 判是否同一个福袋：倒计时回跳超过该值、或上一袋已开奖才算新袋（只按「一键发表评论」计轮）
 watch_seconds = 90.0            # 开奖观察窗口时长
 draw_margin_seconds = 3.0       # 提前多少秒进入观察窗口
-panel_settle_seconds = 1.0      # 面板处理完到下一轮的间隔
+tap_wait_seconds = 3.0          # 点击后等界面反应的最长时间（界面一变就继续；面板渲染慢的机型别调太小）
+panel_settle_seconds = 0.5      # 面板处理完到下一轮的间隔
 
 [pacing]
 min_sleep_seconds = 1.5         # 任何一轮的最短休眠

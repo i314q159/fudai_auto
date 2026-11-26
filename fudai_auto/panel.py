@@ -13,6 +13,7 @@ import time
 import cv2
 import numpy as np
 
+from .config import cfg
 from .dataset import save_dataset
 from .detector import clf_best, find_bag
 from .device import shot, tap
@@ -96,7 +97,56 @@ def panel_state(img):
 def close_panel():
     """点面板外的空白处关闭面板（约屏幕中部）。"""
     tap(*sc_pt(540, 1150))
-    time.sleep(0.8)
+    time.sleep(0.5)
+
+
+def _tap_wait():
+    """点击后等界面反应的最长时间（秒）：界面一变就继续，不必等满。"""
+    return float(cfg("detect", "tap_wait_seconds"))
+
+
+def wait_panel_open(deadline=None):
+    """点完福袋图标后等面板出现。
+
+    出现就立刻返回 (截图, True)；等满 deadline 还没出现返回 (最后一张截图, False)。
+    先等 0.5s 再截第一张：慢机型上「点完立刻截图」抓到的可能还是点击前的画面。
+    """
+    time.sleep(0.5)
+    end = time.time() + (_tap_wait() if deadline is None else deadline)
+    while True:
+        img = shot()
+        if panel_state(img)[0]:
+            return img, True
+        if time.time() >= end:
+            return img, False
+        time.sleep(0.15)
+
+
+def wait_panel_change(panel_px, before, deadline=None):
+    """点完面板按钮后等底部文字变化（面板内容变了/面板消失都算）。
+
+    返回 (截图, 新文字)。文字一直不变时最多等 deadline 秒，和原来的固定等待等价。
+    """
+    time.sleep(0.4)
+    end = time.time() + (_tap_wait() if deadline is None else deadline)
+    while True:
+        img = shot()
+        t = texts_of(ocr(crop(img, panel_px), 0.45))
+        if t != before:
+            return img, t
+        if time.time() >= end:
+            return img, t
+        time.sleep(0.15)
+
+
+# 直播间底部的常见文案：出现这些说明屏上还是直播间（面板没弹出来）
+ROOM_HINTS = ("说点什么", "送礼物", "购物袋", "商品", "点赞", "礼物", "评论")
+
+
+def looks_like_room(img):
+    """底部是评论区/输入框而不是面板，用来判断「能不能安全地再点一次」。"""
+    t = texts_of(ocr(crop(img, sc_roi(PANEL_ROI)), 0.45))
+    return (not t.strip()) or any(k in t for k in ROOM_HINTS)
 
 
 def handle_panel(img):
@@ -134,9 +184,9 @@ def handle_panel(img):
             log(f"面板按钮「{t[:24]}」-> 点击 ({cx},{cy})")
             if "一键发表评论" in t:
                 commented = True
+            before = t
             tap(cx, cy)
-            time.sleep(1.5)
-            img = shot()
+            img, _ = wait_panel_change(panel_px, before)
             pay = texts_of(ocr(crop(img, pay_px), 0.4))
             if any(k in pay for k in PAY_KEYS):
                 log(f"检测到付费确认界面，暂停不自动支付: {pay[:40]}")
@@ -145,7 +195,7 @@ def handle_panel(img):
                 time.sleep(0.6)
                 return "need_payment", rem, "payment", commented
             steps += 1
-            clicked.append(t[:20])
+            clicked.append(before[:20])
             continue
 
         # 情况 2：显示已参与 -> 关面板，交给主循环排开奖时间
@@ -169,9 +219,9 @@ def handle_panel(img):
             cx = wide_roi[0] + hit["x"] + hit["w"] / 2
             cy = wide_roi[1] + hit["y"] + hit["h"] / 2
             log(f"兜底点击「{hit['text']}」({int(cx)},{int(cy)})")
+            before = t
             tap(cx, cy)
-            time.sleep(1.5)
-            img = shot()
+            img, _ = wait_panel_change(panel_px, before)
             pay = texts_of(ocr(crop(img, pay_px), 0.4))
             if any(k in pay for k in PAY_KEYS):
                 log("确认层触发付费，已暂停")
@@ -227,19 +277,23 @@ def open_bag_panel(img, before_tap=None):
         except Exception as e:
             log(f"命中福袋后的附加动作失败(忽略): {e}")
     tap(cx, cy)
-    time.sleep(1.4)
-    img2 = shot()
+    img2, opened = wait_panel_open()
 
-    # 第一次没打开：图标下半部才是可点区域，往下挪一点再点一次
-    if not panel_state(img2)[0]:
+    # 第一次没打开：底部还是直播间（评论区）才安全地再点一次；
+    # 面板正在弹出的情况下再点一下会落在遮罩上，反而把面板关掉
+    if not opened and looks_like_room(img2):
         dy = int(round(18 * SCALE["y"]))
         log(f"首次点击未打开面板({src})，重点一次 ({cx},{cy + dy})")
         tap(cx, cy + dy)
-        time.sleep(1.4)
-        img2 = shot()
+        img2, opened = wait_panel_open()
+    elif not opened:
+        log(f"首次点击后面板区不像直播间（可能正在弹出），本轮不再重点 ({src})")
 
-    if not panel_state(img2)[0]:
-        log(f"未确认福袋面板，不写入样本 ({src})")
+    if not opened:
+        # 诊断：面板没认出来时留一张图 + 底部文案，能区分「没弹出」和「弹了但文案不认识」
+        txt = texts_of(ocr(crop(img2, sc_roi(PANEL_ROI)), 0.45)).strip()
+        save(img2, "panel_unverified")
+        log(f"未确认福袋面板，不写入样本 ({src})；底部文案: {txt[:40] or '（空）'}")
         return img2, f"tap({int(cx)},{int(cy)}) {src} unverified"
 
     # 面板已确认，才把这张图作为正样本入库
