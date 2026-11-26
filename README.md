@@ -133,6 +133,7 @@ adb devices                       # 确认设备已授权
 
 ```
 main.py              运行入口：CLI / 单实例锁 / 冷启动判断 / 主循环
+human/adb_conn.py    探测 adb 设备序列号（未设置 FUDAI_SERIAL 时取第一台设备）
 fudai_auto/          运行时能力包（对外仍是 import fudai_auto as fa，API 不变）
   __init__.py        统一导出 + 可变状态转发（fa.SERIAL / fa.RUN_LOG / fa.ROOM_NAME）
   state.py           可变状态：设备序列号 / 日志路径 / 房间名 / 检测模型
