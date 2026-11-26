@@ -9,3 +9,4 @@ data/*
 !data/fudai/
 data/fudai/*
 !data/fudai/bag_template.png
+.qoder-input-images/
