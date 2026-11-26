@@ -10,7 +10,13 @@ from .paths import ROOT
 
 DEFAULT_CONFIG = {
     "run": {"minutes": 180.0, "interval": 60.0},
-    "room": {"min_rounds": 3, "max_rounds": 9, "switch_after_last_draw": True, "swipe_attempts": 3},
+    "room": {
+        "min_rounds": 3,
+        "max_rounds": 9,
+        "switch_after_last_draw": True,
+        "swipe_attempts": 3,
+        "no_bag_switch_scans": 10,
+    },
     "cold_start": {"below": 30},
     "detect": {
         "shot_retry_seconds": 10.0,
@@ -18,7 +24,6 @@ DEFAULT_CONFIG = {
         "room_check_seconds": 5.0,
         "scan_interval_seconds": 20.0,
         "room_similarity": 0.86,
-        "room_missing_warn_seconds": 180.0,
         "new_cycle_jump_seconds": 90.0,
         "watch_seconds": 90.0,
         "result_auto_close_seconds": 12.0,

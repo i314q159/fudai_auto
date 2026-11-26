@@ -11,6 +11,7 @@ min_rounds = 3                  # 进入直播间时在 min~max 之间随机决�
 max_rounds = 9                  # 蹲守轮数上限；0 = 不切房
 switch_after_last_draw = true   # true: 等最后一轮开奖结果出来再切；false: 最后一轮点完立刻切
 swipe_attempts = 3              # 上滑切房失败重试次数
+no_bag_switch_scans = 10        # 连续多少次没认出福袋图标就切房；0 = 不按此切房
 
 [cold_start]
 below = 30                      # 样本数低于该值走种子图冷启动
@@ -21,7 +22,6 @@ shot_error_log_every_seconds = 30.0  # 连续截图异常时日志节流
 room_check_seconds = 5.0        # 直播间标题巡检间隔（只巡房，不点福袋）
 scan_interval_seconds = 20.0    # 本房间还没跟到福袋时的巡检间隔（缩短以免错过短命福袋）
 room_similarity = 0.86          # 标题相似度≥该值视为同一房间（防 OCR 尾字抖动）
-room_missing_warn_seconds = 180.0
 draw_margin_seconds = 60.0      # 剩余多少秒进开奖观察窗口（即最后 1 分钟内才开始识别开奖结果）
 new_cycle_jump_seconds = 90.0   # 判是否同一个福袋：倒计时回跳超过该值、或上一袋已开奖才算新袋（只按「一键发表评论」计轮）
 watch_seconds = 90.0            # 开奖观察窗口时长

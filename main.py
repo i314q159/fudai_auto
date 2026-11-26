@@ -211,12 +211,12 @@ def main():
     draw_watched = True
     cur_room = None
     room_warned = False
-    last_room_seen = time.time()
     last_err_log = 0.0
     cycle_count = 0          # 当前直播间已真实点击参与的轮次
     click_rem = None         # 上次点击参与时的倒计时，用于判断是否同一个福袋
     click_ts = 0.0
     leave_after_draw = False # 本房间已蹲满轮次，等当前轮开奖后切下一间
+    no_bag_scans = 0         # 当前直播间连续没认出福袋图标的次数
 
     rounds_min = int(fa.cfg("room", "min_rounds"))
     rounds_max = int(fa.cfg("room", "max_rounds"))
@@ -228,6 +228,7 @@ def main():
     room_rounds = 0          # 当前直播间的蹲守轮数目标（进入房间时随机定）
     switch_after_draw = bool(fa.cfg("room", "switch_after_last_draw"))
     swipe_attempts = int(fa.cfg("room", "swipe_attempts"))
+    no_bag_switch_scans = int(fa.cfg("room", "no_bag_switch_scans"))
 
     followed_room = None     # 已经点过关注的直播间：没检测到福袋的房间不点关注
 
@@ -279,7 +280,8 @@ def main():
     def switch_room():
         """上滑切下一个直播间；成功后轮次与开奖状态清零"""
         nonlocal cur_room, cycle_count, click_rem, click_ts, room_rounds
-        nonlocal last_room_seen, next_draw_ts, next_bag_ts, draw_watched, leave_after_draw
+        nonlocal next_draw_ts, next_bag_ts, draw_watched, leave_after_draw
+        nonlocal no_bag_scans
         before = cur_room
         sim = float(fa.cfg("detect", "room_similarity"))
         for attempt in range(1, swipe_attempts + 1):
@@ -296,7 +298,6 @@ def main():
                 fa.log_csv("switch_room", f"{before} -> {name}")
                 cur_room = name
                 fa.ROOM_NAME = name
-                last_room_seen = time.time()
                 cycle_count = 0
                 click_rem = None
                 click_ts = 0.0
@@ -304,6 +305,7 @@ def main():
                 next_bag_ts = 0.0
                 draw_watched = True
                 leave_after_draw = False
+                no_bag_scans = 0
                 room_rounds = pick_rounds(name, rounds_min, rounds_max)
                 return name
             fa.log(f"切房未生效（识别到「{name or '无标题'}」），重试 {attempt}/{swipe_attempts}")
@@ -313,14 +315,19 @@ def main():
         click_rem = None
         click_ts = 0.0
         leave_after_draw = False
+        no_bag_scans = 0
         room_rounds = pick_rounds(cur_room, rounds_min, rounds_max)
         return None
 
     room_check = float(fa.cfg("detect", "room_check_seconds"))
     scan_interval = min(args.interval, float(fa.cfg("detect", "scan_interval_seconds")))
+    no_bag_rule = (
+        f"，连续 {no_bag_switch_scans} 次没认出福袋图标就切房"
+        if no_bag_switch_scans > 0 else "，不按「没认出福袋图标」切房"
+    )
     fa.log(
         f"启动福袋蹲守 {args.minutes} 分钟，检查福袋开奖间隔 {args.interval}s，"
-        f"未跟到福袋时 {scan_interval}s 巡一次，巡房间隔 {room_check}s"
+        f"未跟到福袋时 {scan_interval}s 巡一次，巡房间隔 {room_check}s{no_bag_rule}"
     )
     fa.log_csv("start", f"minutes={args.minutes} interval={args.interval} scan={scan_interval}")
 
@@ -344,7 +351,6 @@ def main():
         name = fa.get_room_name(img)
         if name:
             fa.ROOM_NAME = name
-            last_room_seen = time.time()
             if cur_room is None:
                 cur_room = name
                 fa.log(f"当前直播间: {name}")
@@ -366,6 +372,7 @@ def main():
                     click_rem = None
                     click_ts = 0.0
                     leave_after_draw = False
+                    no_bag_scans = 0
                     fa.save(img, "room_title_change")
                     room_rounds = pick_rounds(name, rounds_min, rounds_max)
                     continue
@@ -374,12 +381,6 @@ def main():
                     f"提示: 当前直播间为「{name}」，与 --room「{args.room}」不一致；已按当前直播间继续"
                 )
                 room_warned = True
-        elif time.time() - last_room_seen > float(fa.cfg("detect", "room_missing_warn_seconds")):
-            mins = float(fa.cfg("detect", "room_missing_warn_seconds")) / 60
-            fa.log(f"警告: 连续 {mins:g} 分钟未识别到直播间标题，可能已离开直播间")
-            fa.log_csv("warn_room", "no-title")
-            last_room_seen = time.time()
-            fa.save(img, "no_room_title")
 
         now = time.time()
         margin = float(fa.cfg("detect", "draw_margin_seconds"))
@@ -447,8 +448,14 @@ def main():
                 bag_touched = True
                 img2, info = fa.open_bag_panel(img, before_tap=maybe_follow)
                 if img2 is None:
-                    fa.log(f"未见福袋图标: {info}")
+                    no_bag_scans += 1
+                    counter = (
+                        f"（连续 {no_bag_scans}/{no_bag_switch_scans} 次）"
+                        if no_bag_switch_scans > 0 else ""
+                    )
+                    fa.log(f"未见福袋图标: {info}{counter}")
                 else:
+                    no_bag_scans = 0
                     st2, t2 = fa.panel_state(img2)
                     if not st2:
                         fa.log(f"打开福袋后面板未识别，关闭 ({info})")
@@ -498,6 +505,17 @@ def main():
                 switch_room()
                 continue
             bag_touched = True
+
+        # 连续多次没认出福袋图标：这间房没袋，直接上滑切下一间（正在等开奖时先不切）
+        if (
+            no_bag_switch_scans > 0
+            and no_bag_scans >= no_bag_switch_scans
+            and not ((not draw_watched) and next_draw_ts > time.time())
+        ):
+            fa.log(f"连续 {no_bag_scans} 次没认出福袋图标，切下一间直播间")
+            fa.log_csv("no_bag_switch", f"{cur_room} scans={no_bag_scans}")
+            switch_room()
+            continue
 
         # 等开奖时按 [run].interval，本房间还没跟到袋时用更快的 [detect].scan_interval_seconds
         gap = bag_gap()
