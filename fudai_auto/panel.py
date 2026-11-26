@@ -71,10 +71,13 @@ def pink_button_box(roi_img):
     return best
 
 
-def read_remaining(img):
-    """两级 ROI 读取面板倒计时（秒）；读不到返回 None。"""
+def read_remaining(img, allow_wide=True):
+    """两级 ROI 读取面板倒计时（秒）；读不到返回 None。
+
+    allow_wide=False 时不做整行兜底识别（慢），用于「已有上次读数」的重复读取。
+    """
     rem = parse_countdown(texts_of(ocr(crop(img, sc_roi(PANEL_HEAD_ROI)), 0.35)))
-    if rem is None:
+    if rem is None and allow_wide:
         rem = parse_countdown(
             texts_of(ocr(crop(img, sc_roi(PANEL_HEAD_ROI_WIDE)), 0.35))
         )
@@ -130,23 +133,30 @@ def wait_panel_open(deadline=None):
         time.sleep(0.15)
 
 
-def wait_panel_change(panel_px, before, deadline=None):
-    """点完面板按钮后等底部文字变化（面板内容变了/面板消失都算）。
+def wait_panel_change(panel_px, before_img, before_text, deadline=None):
+    """点完面板按钮后等底部区域变化（面板内容变了/面板消失都算）。
 
-    返回 (截图, 新文字)。文字一直不变时，至少看 MIN_PANEL_CHECKS 次且超过
-    deadline 才放弃，和原来的固定等待等价。
+    先比像素（很便宜），变了才跑一次 OCR；文字确实变了才返回。
+    慢机型一次 OCR 就要 1s+，这样轮询期间不再反复识别。
     """
     time.sleep(0.4)
     end = time.time() + (_tap_wait() if deadline is None else deadline)
     checks = 0
+    last_text = before_text
     while True:
         img = shot()
         checks += 1
-        t = texts_of(ocr(crop(img, panel_px), 0.45))
-        if t != before:
-            return img, t
+        strip = crop(img, panel_px)
+        changed = (
+            strip.shape != before_img.shape
+            or float(np.mean(cv2.absdiff(strip, before_img))) >= 4.0
+        )
+        if changed:
+            last_text = texts_of(ocr(strip, 0.45))
+            if last_text != before_text:
+                return img, last_text
         if checks >= MIN_PANEL_CHECKS and time.time() >= end:
-            return img, t
+            return img, last_text
         time.sleep(0.15)
 
 
@@ -160,9 +170,23 @@ def looks_like_room(img):
     return (not t.strip()) or any(k in t for k in ROOM_HINTS)
 
 
-def handle_panel(img):
+def _pay_text(img, pay_px, before_img, checked):
+    """付费确认区没变、且之前查过，就不再 OCR（返回 None）；否则识别并返回文本。"""
+    now = crop(img, pay_px)
+    if (
+        checked
+        and now.shape == before_img.shape
+        and float(np.mean(cv2.absdiff(now, before_img))) < 4.0
+    ):
+        return None
+    return texts_of(ocr(now, 0.4))
+
+
+def handle_panel(img, panel_text=None):
     """处理福袋面板：返回 (status, remaining, detail, commented)。
 
+    panel_text: 调用方已经 OCR 过的底部文案（panel_state 的结果），
+    传进来可以省掉一次重复识别，加快第一轮任务判定。
     status:
       joined_now   本次有真实点击（完成任务/加入粉丝团）
       already      打开时已参与，没点任何按钮
@@ -178,12 +202,16 @@ def handle_panel(img):
     steps = 0
     panel_px = sc_roi(PANEL_ROI)
     pay_px = sc_roi(PAY_ROI)
+    first = panel_text is not None
 
+    pay_checked = False
     while steps < 3:
         roi = crop(img, panel_px)
+        pay_before = crop(img, pay_px)
         btn = pink_button_box(roi)
-        t = texts_of(ocr(roi, 0.45))
-        got = read_remaining(img)
+        t = panel_text if first else texts_of(ocr(roi, 0.45))
+        first = False
+        got = read_remaining(img, allow_wide=(rem is None))
         if got is not None:
             rem = got
 
@@ -195,22 +223,30 @@ def handle_panel(img):
             log(f"面板按钮「{t[:24]}」-> 点击 ({cx},{cy})")
             if "一键发表评论" in t:
                 commented = True
-            before = t
             tap(cx, cy)
-            img, _ = wait_panel_change(panel_px, before)
-            pay = texts_of(ocr(crop(img, pay_px), 0.4))
-            if any(k in pay for k in PAY_KEYS):
-                log(f"检测到付费确认界面，暂停不自动支付: {pay[:40]}")
-                save(img, "need_payment")
-                tap(*sc_pt(540, 700))
-                time.sleep(0.6)
-                return "need_payment", rem, "payment", commented
+            img, _ = wait_panel_change(panel_px, roi, t)
+            pay = _pay_text(img, pay_px, pay_before, pay_checked)
+            if pay is not None:
+                pay_checked = True
+                if any(k in pay for k in PAY_KEYS):
+                    log(f"检测到付费确认界面，暂停不自动支付: {pay[:40]}")
+                    save(img, "need_payment")
+                    tap(*sc_pt(540, 700))
+                    time.sleep(0.6)
+                    return "need_payment", rem, "payment", commented
             steps += 1
-            clicked.append(before[:20])
+            clicked.append(t[:20])
             continue
 
         # 情况 2：显示已参与 -> 关面板，交给主循环排开奖时间
         if any(k in t for k in WAIT_KEYS):
+            if rem is None:
+                # 面板刚弹出来时右上倒计时可能还没渲染完，等一下再读一次
+                time.sleep(0.6)
+                img = shot()
+                got = read_remaining(img)
+                if got is not None:
+                    rem = got
             log(f"该福袋已参与，等待开奖（剩余 {rem if rem is not None else '未知'}s）")
             close_panel()
             return (
@@ -230,14 +266,15 @@ def handle_panel(img):
             cx = wide_roi[0] + hit["x"] + hit["w"] / 2
             cy = wide_roi[1] + hit["y"] + hit["h"] / 2
             log(f"兜底点击「{hit['text']}」({int(cx)},{int(cy)})")
-            before = t
             tap(cx, cy)
-            img, _ = wait_panel_change(panel_px, before)
-            pay = texts_of(ocr(crop(img, pay_px), 0.4))
-            if any(k in pay for k in PAY_KEYS):
-                log("确认层触发付费，已暂停")
-                tap(*sc_pt(540, 700))
-                return "need_payment", rem, "payment", commented
+            img, _ = wait_panel_change(panel_px, roi, t)
+            pay = _pay_text(img, pay_px, pay_before, pay_checked)
+            if pay is not None:
+                pay_checked = True
+                if any(k in pay for k in PAY_KEYS):
+                    log("确认层触发付费，已暂停")
+                    tap(*sc_pt(540, 700))
+                    return "need_payment", rem, "payment", commented
             steps += 1
             clicked.append(hit["text"][:16])
             continue

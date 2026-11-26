@@ -11,7 +11,7 @@ import time
 from .config import cfg
 from .device import shot, tap
 from .layout import (
-    RESULT_BTN_TEXTS, RESULT_KEYS, RESULT_ROI, WIN_CLOSE_POINTS,
+    RESULT_ACTION_ROI, RESULT_BTN_TEXTS, RESULT_KEYS, RESULT_ROI, WIN_CLOSE_POINTS,
     crop, sc_pt, sc_roi, sx, sy,
 )
 from .logbook import log, log_csv, save
@@ -104,6 +104,8 @@ def watch_result(seconds=None):
     """开奖观察窗口：轮询截图等待中奖/未中奖文案，命中就关闭并记录。
 
     返回前会把截图和 CSV 事件写好，供复盘（result / result_dismiss）。
+    轮询只识别卡片按钮那一条（RESULT_ACTION_ROI）：没有按钮就说明卡片还没出，
+    比每次识别整块 RESULT_ROI 快 3~4 倍；命中后再用整块区域去关卡片。
     """
     if seconds is None:
         seconds = float(cfg("detect", "watch_seconds"))
@@ -111,12 +113,15 @@ def watch_result(seconds=None):
     last = 0
     poll = float(cfg("watch", "poll_seconds"))
     log_every = float(cfg("watch", "log_every_seconds"))
+    action_px = sc_roi(RESULT_ACTION_ROI)
+    last_text = ""
 
     while time.time() < t_end:
         img = shot()
-        t = texts_of(ocr(crop(img, sc_roi(RESULT_ROI)), 0.45))
-        hits = [k for k in RESULT_KEYS if k in t]
+        last_text = texts_of(ocr(crop(img, action_px), 0.45))
+        hits = [k for k in RESULT_KEYS if k in last_text]
         if hits:
+            t = texts_of(ocr(crop(img, sc_roi(RESULT_ROI)), 0.45))
             save(img, "result")
             log(f"开奖窗口命中 {hits}: {t[:80]}")
             log_csv("result", f"{hits} | {t[:120]}")
@@ -127,5 +132,5 @@ def watch_result(seconds=None):
             return
         if time.time() - last > log_every:
             last = time.time()
-            log(f"等待开奖中… {t[:40]}")
+            log(f"等待开奖中… {last_text[:40]}")
         time.sleep(poll)

@@ -19,8 +19,11 @@ TIME_RE = re.compile(r"\d{1,2}\s*[:：]\s*\d{2}")
 
 
 def ocr(img, min_score=0.5):
-    """OCR 一张图，按置信度过滤，把四点框转成 (x, y, w, h) 方便后续定位。"""
-    res, _ = engine(img)
+    """OCR 一张图，按置信度过滤，把四点框转成 (x, y, w, h) 方便后续定位。
+
+    屏幕截图不会倒置，关掉角度分类器（use_cls）省一点时间。
+    """
+    res, _ = engine(img, use_cls=False)
     items = []
     if res:
         for box, txt, score in res:
