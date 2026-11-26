@@ -92,8 +92,8 @@ uv pip install -r requirements.txt
 ```powershell
 git clone git@github.com:i314q159/fudai_auto.git
 cd fudai_auto
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+uv venv --python 3.13
+uv pip install -r requirements.txt
 adb devices                       # 确认设备已授权
 ```
 
