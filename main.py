@@ -250,7 +250,7 @@ def main():
         return None
 
     room_check = float(fa.cfg("detect", "room_check_seconds"))
-    fa.log(f"启动福袋蹲守 {args.minutes} 分钟，检查间隔 {args.interval}s，巡房间隔 {room_check}s")
+    fa.log(f"启动福袋蹲守 {args.minutes} 分钟，检查福袋开奖间隔 {args.interval}s，巡房间隔 {room_check}s")
     fa.log_csv("start", f"minutes={args.minutes} interval={args.interval}")
 
     while time.time() < t_end:

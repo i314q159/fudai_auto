@@ -36,7 +36,7 @@ uv pip install -r requirements.txt
 | 段 | 键 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `[run]` | `minutes` | 1440 | 运行时长（分钟） |
-| | `interval` | 60 | 福袋面板检查间隔（固定 1 分钟一次） |
+| | `interval` | 60 | 检查福袋开奖间隔（固定 1 分钟一次） |
 | `[room]` | `max_rounds` | 5 | 每个直播间蹲满几轮福袋后上滑切下一间（0 = 不切） |
 | | `switch_after_last_draw` | true | true 等第 5 轮开奖结果出来再切；false 第 5 轮点完立刻切 |
 | | `swipe_attempts` | 3 | 上滑切房失败重试次数 |
@@ -51,7 +51,7 @@ uv pip install -r requirements.txt
 | | `watch_seconds` | 90 | 开奖观察窗口时长 |
 | | `draw_margin_seconds` | 3 | 提前多少秒进观察窗口 |
 | | `panel_settle_seconds` | 1 | 面板处理后的隔拍 |
-| `[pacing]` | `min_sleep_seconds` | 1.5 | 每轮最短休眠（检查间隔固定读 `[run].interval`） |
+| `[pacing]` | `min_sleep_seconds` | 1.5 | 每轮最短休眠（检查福袋开奖间隔固定读 `[run].interval`） |
 | `[sample]` | `throttle_seconds` | 60 | 同状态样本采集节流 |
 | `[watch]` | `poll_seconds` | 3 | 开奖窗口内截图/识别间隔 |
 | | `log_every_seconds` | 20 | “等待开奖中”日志节流 |
