@@ -53,7 +53,8 @@ uv pip install -r requirements.txt
 | | `watch_seconds` | 90 | 开奖观察窗口时长 |
 | | `result_auto_close_seconds` | 12 | 中奖/未中奖卡点不掉时，等它自动关闭的最长时间（不按返回键） |
 | | `draw_margin_seconds` | 3 | 提前多少秒进观察窗口 |
-| | `tap_wait_seconds` | 3 | 点击后等界面反应的最长时间（界面一变就继续；面板渲染慢的机型别调太小） |
+| | `tap_wait_seconds` | 6 | 点击后等界面反应的最长时间（界面一变就继续；至少看 2 次识别才放弃） |
+| | `panel_open_settle_seconds` | 3 | 点开福袋后先等面板渲染，再截第一张识别图 |
 | | `panel_settle_seconds` | 0.5 | 面板处理后的隔拍 |
 | `[pacing]` | `min_sleep_seconds` | 1.5 | 每轮最短休眠（检查间隔读 `[run].interval` / `[detect].scan_interval_seconds`） |
 | `[sample]` | `throttle_seconds` | 60 | 同状态样本采集节流 |
