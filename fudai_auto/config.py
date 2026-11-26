@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
         "shot_retry_seconds": 10.0,
         "shot_error_log_every_seconds": 30.0,
         "room_check_seconds": 5.0,
+        "scan_interval_seconds": 20.0,
         "room_similarity": 0.86,
         "room_missing_warn_seconds": 180.0,
         "default_draw_seconds": 750.0,

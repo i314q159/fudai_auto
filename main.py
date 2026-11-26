@@ -266,8 +266,17 @@ def main():
         return None
 
     room_check = float(fa.cfg("detect", "room_check_seconds"))
-    fa.log(f"启动福袋蹲守 {args.minutes} 分钟，检查福袋开奖间隔 {args.interval}s，巡房间隔 {room_check}s")
-    fa.log_csv("start", f"minutes={args.minutes} interval={args.interval}")
+    scan_interval = min(args.interval, float(fa.cfg("detect", "scan_interval_seconds")))
+    fa.log(
+        f"启动福袋蹲守 {args.minutes} 分钟，检查福袋开奖间隔 {args.interval}s，"
+        f"未跟到福袋时 {scan_interval}s 巡一次，巡房间隔 {room_check}s"
+    )
+    fa.log_csv("start", f"minutes={args.minutes} interval={args.interval} scan={scan_interval}")
+
+    def bag_gap():
+        """下一轮福袋检查的间隔：等开奖时按 interval，本房间还没袋时用更快的 scan_interval。"""
+        waiting = (not draw_watched) and next_draw_ts > time.time()
+        return args.interval if waiting else scan_interval
 
     while time.time() < t_end:
         try:
@@ -435,8 +444,8 @@ def main():
                 continue
             bag_touched = True
 
-        # 福袋面板检查固定按 [run].interval（默认 60s = 1 分钟一次），不再按剩余时间自适应
-        gap = args.interval
+        # 等开奖时按 [run].interval，本房间还没跟到袋时用更快的 [detect].scan_interval_seconds
+        gap = bag_gap()
         if bag_touched:
             # 从本轮检查起点计时，保证两次面板检查的间隔稳定在 gap 左右
             next_bag_ts = now + gap

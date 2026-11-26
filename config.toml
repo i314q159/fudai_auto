@@ -18,6 +18,7 @@ below = 30                      # 样本数低于该值走种子图冷启动
 shot_retry_seconds = 10.0       # 截图异常后的重试等待
 shot_error_log_every_seconds = 30.0  # 连续截图异常时日志节流
 room_check_seconds = 5.0        # 直播间标题巡检间隔（只巡房，不点福袋）
+scan_interval_seconds = 20.0    # 本房间还没跟到福袋时的巡检间隔（缩短以免错过短命福袋）
 room_similarity = 0.86          # 标题相似度≥该值视为同一房间（防 OCR 尾字抖动）
 room_missing_warn_seconds = 180.0
 default_draw_seconds = 300.0    # 读不到倒计时时的默认排期（5 分钟）
