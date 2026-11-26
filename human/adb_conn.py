@@ -3,7 +3,6 @@ import subprocess
 
 def get_adb_device_serial_via_subprocess():
     try:
-        # Run the command and capture output, checking for errors
         result = subprocess.run(
             ["adb", "devices"], capture_output=True, text=True, check=True
         )
