@@ -76,9 +76,20 @@ uv pip install -r requirements.txt
 .\train.ps1 -SkipState               # 只训检测模型
 .\train.ps1 -SkipDetector            # 只训状态模型
 .\train.ps1 -Aug 16 -Epochs 800      # 状态模型增强/轮数
+.\train.ps1 -Device cuda             # 强制用 NVIDIA GPU 提特征（需先装 torch）
 .\train.ps1 -Predict data\fudai\icons # 用状态模型预测图片/目录
 .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动全量重训（常驻）
 ```
+
+提特征的计算设备自动选择：装好 `torch` 且检测到 NVIDIA GPU 时用 GPU，否则用 CPU（numpy 向量化），日志会打印当前后端（如 `特征后端: NVIDIA GPU ...` / `特征后端: CPU（未安装 torch…）`）。`-Device auto|cpu|cuda` 或 `--device` 可强制指定，`cuda` 不可用时直接报错而不是偷偷降级。torch 不写进 `requirements.txt`（只有想用 GPU 才需要）：
+
+```powershell
+uv pip install torch                 # 可选：让训练用上 NVIDIA GPU
+```
+
+GPU 与 CPU 的 HOG 只在浮点末位上不同（个别像素会落到相邻方向档），实测 360 个真实窗口的检测分数差最大 0.006、没有一个跨过阈值，用哪个后端训练的模型都能直接给运行时（CPU 逐窗算特征）用。首次上 GPU 时会抽 16 个窗口和 CPU 版对齐一次，平均偏差过大就退回 CPU 并打印警告。GPU 只接管 HOG 这一段，颜色直方图仍在 CPU 上用 cv2 算（每窗 10 us，搬上 GPU 反而更慢）。
+
+速度上做了三件事，训练日志会分别打印耗时：HOG 从「每窗 48 次 `np.histogram`」改成一次算方向档 + `bincount` 累加（HOG 单窗 1.8 ms → 0.09 ms，整套特征 1.9 ms → 0.15 ms，约 12 倍）；负样本按帧流式提特征、截图多线程解码（139 帧 4.9 s → 0.9 s），不再把几万个窗口堆在内存里；状态模型的增强特征只提一次，LOO 每一折复用同一份特征矩阵（旧实现每折都把 n-1 张的增强特征重提一遍，是 O(n²)）。本机实测（306 张图标 + 139 帧截图）：检测模型 4 s、状态模型 79 s（其中 LOO 78 s）。
 
 冷启动逻辑：`data/fudai/icons` 里的样本数 < `-ColdStartBelow`（默认 30）时，检测模型改为用一张种子图 bootstrap（`python -m bootstrap_fudai_clf`），只做“点火”；样本涨到阈值后再跑全量训练。bootstrap 的阈值搜索同样不低于 `fudai_feat.MIN_THRESH`，自评 F1 < 0.5 会直接失败退出（不写模型、不 `--install`），避免把不可用的点火模型装成生产模型。状态模型要求至少 2 个类别，冷启动阶段会自动跳过。`main.py` 启动时读 `config.toml [cold_start].below`（默认 30）做同样判断：没有检测模型且样本不足，会先 bootstrap 再热加载。`train.ps1` 的 `-ColdStartBelow` 是独立参数，改阈值时两边保持一致。
 
@@ -156,11 +167,13 @@ fudai_auto/          运行时能力包（对外仍是 import fudai_auto as fa�
   dataset.py         福袋样本采集
 fudai_feat/          特征包：HOG+HSV 特征与滑窗打分，训练/推理共用
   params.py          窗口/特征尺寸与判定阈值下限常量
-  descriptor.py      单窗口 -> 特征向量
+  hog.py             向量化 HOG（逐窗 / 批量共用同一份实现）
+  accel.py           特征计算后端：自动选 NVIDIA GPU（torch CUDA）或 CPU
+  descriptor.py      单窗口 -> 特征向量（HOG + HSV 直方图），含批量版 feat_batch
   sliding.py         ROI 滑窗打分
 train_fudai_clf/     检测模型训练包（python -m train_fudai_clf）
   paths.py           路径与设计基准
-  samples.py         正/负样本构造
+  samples.py         正/负样本构造（负样本按帧流式产出）
   train.py           线性判别 + 阈值搜索 + 落盘
   __main__.py        命令行入口
 bootstrap_fudai_clf/ 冷启动包（python -m bootstrap_fudai_clf）
@@ -172,9 +185,9 @@ bootstrap_fudai_clf/ 冷启动包（python -m bootstrap_fudai_clf）
 train_fudai/         状态模型训练包（python -m train_fudai，3 分类 + LOO 评估）
   paths.py           路径与类别常量
   dataset.py         样本装载、标签归一化、统计、稳定随机种子
-  features.py        HOG + HSV 特征、数据增强
+  features.py        HOG + HSV 特征（含批量版）、数据增强
   model.py           softmax 分类器与模型存取
-  eval.py            留一交叉验证
+  eval.py            特征矩阵 + 留一交叉验证
   cli.py             训练 / 预测流程与参数
   __main__.py        命令行入口
 train.ps1            一键训练/预测/常驻重训（含冷启动阈值）
