@@ -9,13 +9,15 @@
 import argparse
 import glob
 import os
+import time
 
 import cv2
-import numpy as np
 
-from .dataset import load_samples, print_dataset_stats, stable_seed
-from .eval import leave_one_out
-from .features import augment, extract_features
+from fudai_feat import accel
+
+from .dataset import load_samples, print_dataset_stats
+from .eval import feature_matrix, leave_one_out
+from .features import extract_features
 from .model import SoftmaxClassifier, load_model
 from .paths import (
     CLASSES, EXTRA_SOURCES, LABELS_CSV, MODEL_PATH, ROOT,
@@ -37,6 +39,8 @@ def build_parser():
                     help="额外数据地址（图片文件或目录），可多个；默认已含 data/fudai/bag_template.png")
     ap.add_argument("--extra-label", choices=CLASSES, default=None,
                     help="给额外数据强制指定类别（默认按文件名推断，推断不出则不参与训练）")
+    ap.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto",
+                    help="特征计算设备：auto 检测到 NVIDIA GPU（且装了 torch）就用 GPU，否则 CPU")
     return ap
 
 
@@ -65,10 +69,18 @@ def train(args):
 
     print(f"\n特征维度: {extract_features(trainable[0]['img']).shape[0]}  "
           f"(HOG + HSV)  增强倍数: {args.aug}")
+    print(f"特征后端: {accel.describe(args.device)}")
+
+    # 特征只提一次：LOO 的每一折和最终全量训练都复用这份矩阵
+    t0 = time.perf_counter()
+    X, y, owner = feature_matrix(trainable, args.aug, args.device)
+    print(f"提特征 {len(X)} 张（含增强），耗时 {time.perf_counter() - t0:.1f}s")
 
     print("\n[1/2] Leave-One-Out 交叉验证…")
-    acc, cm, wrong = leave_one_out(trainable, args.aug, args.epochs)
-    print(f"  LOO 准确率: {acc * 100:.1f}%  (样本 {len(trainable)}，仅作参考)")
+    t0 = time.perf_counter()
+    acc, cm, wrong = leave_one_out(trainable, X, y, owner, args.epochs)
+    print(f"  LOO 准确率: {acc * 100:.1f}%  (样本 {len(trainable)}，仅作参考，"
+          f"耗时 {time.perf_counter() - t0:.1f}s)")
     print("  真实\\预测 " + " ".join(f"{c:>9}" for c in CLASSES))
     for a in CLASSES:
         row = " ".join(f"{cm[a].get(b, 0):>9}" for b in CLASSES)
@@ -81,13 +93,8 @@ def train(args):
         print("\n--dry-run：不写模型文件")
         return 0
 
-    # 全量训练：每张样本用文件名种子做增强，保证结果可复现
+    # 全量训练：直接用上面算好的增强特征矩阵，结果可复现
     print("\n[2/2] 全量训练并保存…")
-    X, y = [], []
-    for s in trainable:
-        for v in augment(s["img"], np.random.default_rng(stable_seed(s["path"])), n=args.aug):
-            X.append(extract_features(v))
-            y.append(s["label"])
     clf = SoftmaxClassifier().fit(X, y, epochs=args.epochs, verbose=True)
 
     # 训完自检：原图应全部预测正确
