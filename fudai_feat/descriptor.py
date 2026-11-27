@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """单窗口特征描述子：HOG（梯度方向直方图）+ HSV 颜色直方图。
 
-不依赖 OpenCV 的 HOGDescriptor（OpenCV 5 已移除），纯 numpy 手写，
-训练脚本和运行时检测共用这一份实现，保证特征口径完全一致。
+不依赖 OpenCV 的 HOGDescriptor（OpenCV 5 已移除），HOG 用 ``fudai_feat.hog``
+的向量化实现（训练批量、运行时逐窗共用同一份，口径完全一致）。
 """
 import cv2
 import numpy as np
 
+from . import accel, hog
 from .params import FEA_W, FEA_H, CELL, BINS
 
 
@@ -17,21 +18,8 @@ def resize_win(win):
 
 def _hog(gray):
     """计算灰度图的 HOG：按 CELL 网格统计梯度方向直方图，单元内 L2 归一。"""
-    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
-    mag = cv2.magnitude(gx, gy)
-    # atan2 得到 -180~180，取模 180 让相反方向合并（无符号梯度）
-    ang = (np.degrees(np.arctan2(gy, gx)) + 180.0) % 180.0
-
-    ncy, ncx = FEA_H // CELL, FEA_W // CELL
-    hog = np.zeros((ncy, ncx, BINS), np.float32)
-    for cy in range(ncy):
-        for cx in range(ncx):
-            m = mag[cy * CELL:(cy + 1) * CELL, cx * CELL:(cx + 1) * CELL]
-            a = ang[cy * CELL:(cy + 1) * CELL, cx * CELL:(cx + 1) * CELL]
-            hist, _ = np.histogram(a, bins=BINS, range=(0, 180), weights=m)
-            hog[cy, cx] = hist / (np.linalg.norm(hist) + 1e-6)
-    return hog.flatten()
+    mag, ang = hog.gradients(gray)
+    return hog.cells(mag, ang, CELL, BINS)
 
 
 def _hsv_hist(bgr):
@@ -50,3 +38,19 @@ def feat(win):
     im = resize_win(win)
     gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(np.float32)
     return np.concatenate([_hog(gray), _hsv_hist(im).astype(np.float32)])
+
+
+def feat_batch(wins, device="auto"):
+    """批量提特征（训练用），结果与逐窗 ``feat`` 一致。
+
+    HOG 交给 ``accel`` 按批算（有 NVIDIA GPU 且装了 torch 时自动用 GPU），
+    颜色直方图仍在 CPU 上用 cv2 算。
+    """
+    if len(wins) == 0:
+        dim = (FEA_H // CELL) * (FEA_W // CELL) * BINS + 12 * 8
+        return np.zeros((0, dim), np.float32)
+    ims = np.stack([resize_win(w) for w in wins])
+    grays = np.stack([cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) for im in ims])
+    hogs = accel.hog_batch(grays, CELL, BINS, device)
+    color = np.stack([_hsv_hist(im).astype(np.float32) for im in ims])
+    return np.hstack([hogs, color]).astype(np.float32)
