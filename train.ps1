@@ -15,6 +15,7 @@
 #   .\train.ps1 -SkipState               # 只训检测模型
 #   .\train.ps1 -SkipDetector            # 只训状态模型
 #   .\train.ps1 -Aug 16 -Epochs 800      # 状态模型增强倍数/轮数
+#   .\train.ps1 -Device cuda             # 强制用 NVIDIA GPU 提特征（需先装 torch）
 #   .\train.ps1 -Predict data\fudai\icons # 用状态模型预测
 #   .\train.ps1 -Watch -IntervalSec 300  # 样本数变化自动重训（常驻）
 #
@@ -34,6 +35,8 @@ param(
     [string]$ExtraLabel = "",
     [string]$Python = "",
     [int]$ColdStartBelow = 30,
+    [ValidateSet('auto', 'cpu', 'cuda')]
+    [string]$Device = 'auto',
     [string]$Seed = "",
     [switch]$SkipDetector,
     [switch]$SkipState,
@@ -107,7 +110,7 @@ function Invoke-Detector {
         return $LASTEXITCODE
     }
 
-    $a = @('-m', 'train_fudai_clf')
+    $a = @('-m', 'train_fudai_clf', '--device', $Device)
     if ($Dry) { $a += '--dry-run' }
     Write-Host "`n=== [1] 检测模型（样本 $count ≥ 阈值 $ColdStartBelow） $(if ($Dry) { '(dry-run)' } else { $detModel }) ===" -ForegroundColor Cyan
     Push-Location $root
@@ -118,7 +121,7 @@ function Invoke-Detector {
 
 function Invoke-State {
     param([switch]$Dry)
-    $a = @('-m', 'train_fudai', '--aug', $Aug, '--epochs', $Epochs)
+    $a = @('-m', 'train_fudai', '--aug', $Aug, '--epochs', $Epochs, '--device', $Device)
     if ($Dry) { $a += '--dry-run' }
     if ($Labels) { $a += @('--labels', $Labels) }
     if ($Model) { $a += @('--model', $Model) }

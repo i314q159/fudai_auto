@@ -4,6 +4,9 @@ opencv-python==5.1.0.95
 numpy==2.5.5
 rapidocr-onnxruntime==1.2.3
 
+# 可选：只有想让训练用上 NVIDIA GPU 才需要（装了且检测到 CUDA 设备时自动启用）
+# uv pip install torch
+
 # 以下由 rapidocr-onnxruntime 自动带入，一般无需手动安装
 # onnxruntime==1.32.0
 # pyclipper==1.4.0
